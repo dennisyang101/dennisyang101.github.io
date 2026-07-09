@@ -15,4 +15,8 @@ npm run server
 npx hexo new post "文章標題"
 ```
 
-Push to `main`; GitHub Actions deploys to Pages.
+Source lives on `source`. Publish generated HTML to `main`:
+
+```bash
+npm run publish
+```
