@@ -1,4 +1,4 @@
-# DennisYang777.github.io
+# dennisyang101.github.io
 
 Hexo blog. Mixed notes: tech, agents, quant trading, and personal writing.
 
