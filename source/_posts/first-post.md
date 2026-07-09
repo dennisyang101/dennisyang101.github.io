@@ -1,6 +1,6 @@
 ---
 title: 第一篇文章
-date: 2025-07-13
+date: 2025-07-13 12:00:00
 categories:
   - 技術筆記
 tags:
