@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="440" viewBox="0 0 960 440" role="img" aria-labelledby="title desc">
+  <title id="title">移除 Tailscale Serve 後的連線路徑</title>
+  <desc id="desc">上半部是失敗的路徑：Tailscale Serve 將請求送回 Mac Mini 自己的 Tailscale IP。下半部是成功的路徑：MacBook 直接透過 Tailscale 連到 Mac Mini 的 Hermes serve。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#52616b"/></marker>
+    <marker id="red-arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#b54444"/></marker>
+    <marker id="green-arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#287a54"/></marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", sans-serif; fill: #27313a; }
+      .label { font-size: 18px; font-weight: 600; }
+      .small { font-size: 14px; fill: #5b6770; }
+      .box { fill: #f6f8f9; stroke: #aeb9c1; stroke-width: 2; rx: 10; }
+      .bad { fill: #fff3f2; stroke: #b54444; stroke-width: 2; stroke-dasharray: 7 5; rx: 10; }
+      .good { fill: #f1fbf5; stroke: #287a54; stroke-width: 2; rx: 10; }
+    </style>
+  </defs>
+  <rect width="960" height="440" fill="#ffffff"/>
+
+  <text x="30" y="38" class="label">原本：多了一層 Serve，請求繞回 Mini 自己</text>
+  <rect x="35" y="62" width="190" height="76" class="box"/>
+  <text x="130" y="94" text-anchor="middle" class="label">MacBook</text>
+  <text x="130" y="119" text-anchor="middle" class="small">Hermes Desktop</text>
+  <line x1="225" y1="100" x2="330" y2="100" stroke="#52616b" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect x="335" y="62" width="185" height="76" class="bad"/>
+  <text x="427" y="94" text-anchor="middle" class="label">Tailscale Serve</text>
+  <text x="427" y="119" text-anchor="middle" class="small">後來移除</text>
+  <line x1="520" y1="100" x2="640" y2="100" stroke="#b54444" stroke-width="3" marker-end="url(#red-arrow)"/>
+  <rect x="645" y="62" width="280" height="76" class="box"/>
+  <text x="785" y="94" text-anchor="middle" class="label">Mac Mini</text>
+  <text x="785" y="119" text-anchor="middle" class="small">Tailscale IP → hermes serve</text>
+  <path d="M785 138 C900 178, 900 38, 820 55" fill="none" stroke="#b54444" stroke-width="3" marker-end="url(#red-arrow)"/>
+  <text x="775" y="183" text-anchor="middle" class="small" fill="#b54444">繞回同一台機器，HTTP 沒有正常回應</text>
+
+  <line x1="30" y1="225" x2="930" y2="225" stroke="#d9e0e4" stroke-width="2"/>
+  <text x="30" y="270" class="label">最後：移除 Serve，直接走 Tailscale</text>
+  <rect x="35" y="296" width="190" height="76" class="box"/>
+  <text x="130" y="328" text-anchor="middle" class="label">MacBook</text>
+  <text x="130" y="353" text-anchor="middle" class="small">Hermes Desktop</text>
+  <line x1="225" y1="334" x2="640" y2="334" stroke="#287a54" stroke-width="4" marker-end="url(#green-arrow)"/>
+  <text x="430" y="316" text-anchor="middle" class="small">Tailscale 加密私有網路</text>
+  <rect x="645" y="296" width="280" height="76" class="good"/>
+  <text x="785" y="328" text-anchor="middle" class="label">Mac Mini</text>
+  <text x="785" y="353" text-anchor="middle" class="small">Tailscale IP → hermes serve</text>
+  <text x="480" y="414" text-anchor="middle" class="small">少一層轉送，Desktop、服務綁定位置和網址都直接對上。</text>
+</svg>
