@@ -1,5 +1,5 @@
 ---
-title: 用 Tailscale 讓 MacBook Hermes Desktop 連回 Mac Mini
+title: 讓 MacBook 在外面也能用家裡的 Hermes Agent
 date: 2026-07-13 19:42:37
 categories:
   - 技術筆記
@@ -10,114 +10,116 @@ tags:
   - 遠端連線
 ---
 
-我平常把 Hermes Agent 放在家裡的 Mac Mini。它負責跑 agent、開 terminal、讀寫工作檔案和執行排程；MacBook 則是出門時帶著的電腦。
+Hermes Agent 平常跑在家裡的 Mac Mini。那台機器不會帶出門，但它保留了我平常使用的環境：模型設定、工作檔案、terminal、skills 和 cron 都在那裡。
 
-我想做的事情其實很單純：人在外面時，打開 MacBook 的 Hermes Desktop，繼續使用家裡 Mini 上原本那個 Hermes。環境不用搬來搬去，工作也還是在 Mini 上完成。
+出門時我帶的是 MacBook。於是有一件事一直有點卡：明明 Mini 在家裡正常跑著，MacBook 卻只能算另一台乾淨的電腦。我要的不是再裝一套 Hermes，也不是把檔案複製到兩邊；我只想在外面打開 MacBook 的 Hermes Desktop，繼續操作家裡那個 Hermes。
 
-我不想為了這件事開 router port，更不想把管理介面直接放到公網。查過可行方案後，選了 Tailscale。兩台 Mac 已經在同一個 Tailscale 私有網路裡，它能讓它們像在同一個安全的內網裡互相連線，而且傳輸會加密。
+這件事有兩個前提。第一，不能為了方便就開 router port，讓管理介面直接面對網際網路。第二，MacBook 只是入口，真正跑 agent 和處理檔案的地方仍然是 Mac Mini。
 
-最後想要的路徑是：
+查了一輪後，我選 Tailscale。兩台 Mac 已經在同一個 Tailscale tailnet 裡，它提供一個加密的私有網路；MacBook 可以安全地找到 Mini，但外面的陌生裝置不會因此看到 Mini 的 Hermes 服務。
+
+我原本以為這只是填一個遠端網址的事。最後倒也沒有變成很大的工程，不過中間改了兩次 Mac Mini 的設定，才搞懂每一層到底在做什麼。
+
+## 一開始先連錯了服務
+
+Mini 原本有一個 `hermes gateway` 在跑，它負責 Discord 和 cron 這類訊息通道。我先入為主地以為 Hermes Desktop 也是連它。
+
+實際上不是。Desktop 的 **Remote gateway** 要連的是 `hermes serve`。
+
+可以把兩者想成不同的門：`hermes gateway` 是 Hermes 收發外部訊息的門；`hermes serve` 才是讓 Desktop 打開介面、建立即時連線的門。名字很像，功能完全不同。
+
+所以第一個調整，是在 Mini 上另外讓 `hermes serve` 常駐，並交給 launchd 管理。到這裡，MacBook 至少有一個正確的目標可以連。
+
+接著我用了 Tailscale Serve。它可以理解成一個接待台：MacBook 先連到這個 HTTPS 入口，接待台再把請求轉交給後面的 `hermes serve`。
 
 ```text
 MacBook 的 Hermes Desktop
-  → Tailscale 私有網路
-  → 家裡 Mac Mini 上的 Hermes
-```
-
-中間實際調整了兩次 Mac Mini 的設定，才把這條路接通。
-
-## 第一次調整：先找到 Desktop 真正要連的入口
-
-Mini 原本已經有 `hermes gateway` 在跑。它負責 Discord、cron 這類訊息通道，我一開始以為 Desktop 也會連它。
-
-後來才知道，Desktop 要連的是另一個入口：`hermes serve`。可以簡單理解成：前者讓 Hermes 收發訊息，後者讓 Desktop 打開並操作 Hermes。名字很像，但不是同一件事。
-
-所以第一個改動，是讓 Mac Mini 另外常駐 `hermes serve`，交給 launchd 管理。這樣 MacBook 的 Desktop 才有一個明確的目的地可以連。
-
-當時我多加了一層 Tailscale Serve，想讓 Desktop 連一個 HTTPS 網址。Tailscale Serve 有點像接待台：它先收到請求，再把請求交給後面的 Hermes。
-
-```text
-MacBook Desktop
   → Tailscale Serve
-  → hermes serve
+  → Mac Mini 上的 hermes serve
 ```
 
-這個做法看起來合理，但第一次連線沒有真的成功。
+看起來比直接開服務更完整，也有 HTTPS；但第一個問題就是從這裡開始的。
 
-## 問題一：入口看起來正常，Hermes 卻沒有收到請求
+## 第一次卡住：看起來都通，Hermes 卻沒回話
 
-當時 MacBook 看到的狀態都不錯：Tailscale 顯示 Mini 在線、HTTPS 可以建立連線。照理說，應該快好了。
+MacBook 端當時其實有不少好消息：Tailscale 顯示 Mini 在線、443 port 有反應，TLS handshake 也成功。照這些訊號看，像是已經連上了。
 
-但實際打開服務時，畫面一直等不到 Hermes 的回應。
+但真正用 Desktop 打開服務時，它一直等不到 Hermes 的回應。入口有亮，後面卻沒有人開門。
 
-回頭看才發現，我把路繞複雜了。Tailscale Serve 已經把請求帶到 Mac Mini，卻又被設定成轉送到 Mini 自己的 Tailscale 位址。等於訪客已經到門口，又被請去繞社區一圈，再回到同一扇門。這段繞路沒有成功，Hermes 自然收不到請求。
+後來回頭看設定，才發現我把路繞複雜了。Tailscale Serve 已經把請求帶到 Mac Mini，卻又被設定成轉送到 Mini 自己的 Tailscale 位址。等於訪客已經走到門口，又被請去繞社區一圈，再回到同一扇門。這條繞路在我的設定裡沒有成功，Hermes 因此根本沒有收到請求。
 
 ![移除 Tailscale Serve 前後的連線路徑](/images/hermes-tailscale-serve-removal.svg)
 
-我先把轉送目標改成 `127.0.0.1:9119`，也就是 Mini 自己的本機位址。這次 Hermes 終於有回應，證明請求真的進到了服務裡；不過它馬上又拒絕了請求。
+我先把轉送目標改成 `127.0.0.1:9119`，也就是 Mini 自己的本機位址。這次終於拿到 HTTP 回應，證明請求有進到 Hermes；不過它接著拒絕了請求。
 
-這件事也提醒我，看到「網路通了」不代表整件事完成。連線入口正常，還要確認後面的 Hermes 真的有收到並回應。
+這一段留下的教訓很樸素：看到網路通了，不代表功能真的可用。還是得確認最末端的服務有收到請求、有回應。
 
-## 問題二：Hermes 認不出這個請求
+## 第二次卡住：Hermes 不認得它收到的網址
 
-第二次出現的訊息是：
+下一個錯誤是：
 
 ```text
 Invalid Host header
 ```
 
-白話來說，Hermes 原本被設定成只接受「這台 Mini 自己」的請求；但經過 Tailscale Serve 後，請求帶來的是另一個網址名稱。Hermes 認為這和它預期的來源不一致，所以拒絕了它。
+白話來說，Hermes 當時被設定成只接受「這台 Mini 自己」送來的請求；但經過 Tailscale Serve 轉送後，請求帶著另一個外部網址名稱。Hermes 覺得來訪者報的地址不對，所以把門關上。
 
-這個限制不是多餘的麻煩，而是保護措施。把它關掉，或讓服務對整個家用 LAN 都開放，或許可以先讓錯誤消失；但也會把本來只想給 Tailscale 裝置用的管理入口放得太寬。我沒有採用這個做法。
+一開始很容易把它當成麻煩的限制，想直接關掉。但這其實是安全保護：一個只打算給本機用的服務，不應該隨便接受任何網址名稱帶來的請求。
 
-<details>
-<summary>技術上發生了什麼？</summary>
+當時也有比較粗暴的做法，例如把服務改成接受整個家用 LAN 的連線，或略過這個檢查。它們可能能讓錯誤消失，但也把管理入口開得比需求更大。這不是我想換來的方便。
 
-`hermes serve` 綁在 `127.0.0.1` 時，只接受 `localhost` 或 `127.0.0.1` 這類本機網址。Tailscale Serve 轉送時保留外部的 Tailscale hostname，因此觸發 Hermes 的 Host header／DNS rebinding 防護。
+於是沒有再補設定，而是把不必要的那一層拿掉。
 
-</details>
+## 第二次調整：讓 MacBook 直接走 Tailscale 到 Mini
 
-## 第二次調整：拿掉中間轉送，直接走 Tailscale
+既然 MacBook 和 Mini 已經在同一個私有網路，Tailscale Serve 其實不是必要的中間人。
 
-後來我把路徑縮短了。
-
-既然 MacBook 和 Mini 已經在同一個 Tailscale 私有網路，就不需要再加 Tailscale Serve 當中間人。Mini 上的 `hermes serve` 直接只聽 Tailscale IP；MacBook Desktop 也直接連那個 IP。
+最後做法是：Mini 上的 `hermes serve` 只綁定自己的 Tailscale IP，MacBook Desktop 也直接連那個 IP。
 
 ```text
-MacBook Desktop
-  → Tailscale 加密連線
+MacBook 的 Hermes Desktop
+  → Tailscale 加密私有網路
   → Mac Mini 的 hermes serve
 ```
 
-設定概念上是這樣：
+概念上的設定只有兩件事：
 
 ```text
-hermes serve --host <TAILSCALE_IP> --port 9119 --no-open
-MacBook Remote gateway: http://<TAILSCALE_IP>:9119
+Mac Mini：hermes serve --host <TAILSCALE_IP> --port 9119 --no-open
+MacBook：Remote gateway = http://<TAILSCALE_IP>:9119
 ```
 
-這樣做有三個原因：
+這次路徑短了，也剛好解掉前面兩個問題：
 
-- **少一層轉送。** 請求不用再經過 Serve，路徑更單純。
-- **安全範圍剛好。** 服務只在 Tailscale 的私有網路出現，不會開到家用 LAN 或公網。
-- **網址一致。** Desktop 連的位址和 Mini 服務聽的位址相同，Hermes 的保護機制不會再誤擋。
+- 請求不再經過多餘的接待台，不會繞回 Mini 自己。
+- Desktop 使用的網址和 Mini 服務監聽的網址一致，Hermes 不會再把它誤認成不該接受的請求。
+- 服務只出現在 Tailscale 私有網路，不會被家用 LAN 或公網上的裝置碰到。
 
-網址看起來是 `http://`，不過資料並不是直接裸露在網際網路上；兩台機器之間仍走 Tailscale 的 WireGuard 加密通道。這個情境下，再多加一層反向代理和 TLS 沒有帶來必要好處，反而多了出錯的位置。
+網址雖然寫成 `http://`，但資料並不是直接裸露在網際網路上。兩台機器之間仍然走 Tailscale 的 WireGuard 加密通道。這個情境下，再多加一層反向代理和 TLS，沒有解決實際問題，反而多了一個可能壞掉的地方。
 
-## Tailscale 之外，還是要登入
+## 私有網路之外，還是要登入
 
-即使只有同一個 Tailscale 網路裡的裝置能連進來，我仍保留 Hermes 的 Basic Auth。
+Tailscale 限制的是「哪些裝置能靠近 Mini」，但我還是保留 Hermes 的 Basic Auth。Desktop 會顯示一般的帳密登入表單，登入後才建立即時連線。
 
-Desktop 會顯示一般的帳密登入表單。登入後才建立與 Hermes 的即時連線。Tailscale 負責限制「哪些裝置可以靠近」，Basic Auth 則確認「正在操作的人是否能登入 Hermes」；兩層都保留。
+這樣分工很清楚：Tailscale 保護網路邊界，Basic Auth 保護 Hermes 本身。就算 MacBook 是已授權的裝置，打開 Hermes 前仍要登入。
 
-## 最後怎麼確認真的好了
+## 最後怎麼知道它真的好了
 
-最後不是只看 ping 通，而是從 MacBook Desktop 真的走完一次使用流程：
+最後的驗證不是只看 ping 通，而是拿 MacBook 實際走完一次使用流程：
 
-1. Desktop 找得到 Mini，並顯示帳密登入。
-2. 輸入帳密後可以儲存設定、重新連線。
-3. Desktop 顯示已連上，能正常操作 Mini 上的 Hermes。
+1. Hermes Desktop 找得到 Mini，並顯示登入表單。
+2. 輸入帳密後可以儲存設定並重新連線。
+3. Desktop 顯示已連上，也能正常操作 Mini 上的 Hermes。
 
-技術上，最後的即時連線完成了 WebSocket upgrade，收到 `101 Switching Protocols` 和 `gateway.ready`。這是我確認整條路真正打通的依據；一般使用時，只要 Desktop 可以正常連上並工作就夠了。
+技術上，最後的即時連線完成了 WebSocket upgrade，收到了 `101 Switching Protocols` 和 `gateway.ready`。這代表整條路真的接通；一般使用時，只要 Desktop 能正常連上並工作就夠了。
 
-最後留下的設定其實不多：Tailscale、只綁 Tailscale IP 的 `hermes serve`，以及登入保護。沒有 port forwarding，也沒有公開的管理介面。對兩台已經在同一個 Tailscale 網路裡的 Mac，直接連反而是最穩、也最容易維護的方式。
+最後留下來的東西比一開始想像的少：Tailscale、只綁 Tailscale IP 的 `hermes serve`，以及登入保護。沒有 port forwarding，沒有公開的管理介面，也沒有不必要的反向代理。
+
+這次比較有意思的不是某個指令，而是過程裡一直在做同一件事：每多一層設定，就多一個可能出錯的位置。既然兩台 Mac 已經在同一個安全的私有網路裡，直接連反而是最穩、也最容易維護的方案。
+
+<details>
+<summary>技術備註：第二次錯誤的原因</summary>
+
+`hermes serve` 綁在 `127.0.0.1` 時，只接受 `localhost` 或 `127.0.0.1` 這類本機 Host header。Tailscale Serve 轉送時保留外部的 Tailscale hostname，因此觸發 Hermes 的 Host header／DNS rebinding 防護。
+
+</details>
