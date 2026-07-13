@@ -52,41 +52,27 @@ MacBook 端當時其實有不少好消息：Tailscale 顯示 Mini 在線、443 p
 
 ![移除 Tailscale Serve 前後的連線路徑](/images/hermes-tailscale-serve-removal.svg)
 
-我先把轉送目標改成 `127.0.0.1:9119`，也就是 Mini 自己的本機位址。這次終於拿到 HTTP 回應，證明請求有進到 Hermes；不過它接著拒絕了請求。
+我先把轉送目標改成 `127.0.0.1:9119`，也就是 Mini 自己的本機位址。這次終於拿到 HTTP 回應，證明請求有進到 Hermes；下一個錯誤隨即出現。
 
-這一段留下的教訓很樸素：看到網路通了，不代表功能真的可用。還是得確認最末端的服務有收到請求、有回應。
+這一段學到的是：看到網路通了，不代表功能真的可用。還是得確認最末端的服務有收到請求、有回應。
 
-## 第二次卡住：Hermes 不認得它收到的網址
+## 第二次卡住：請求終於到了，主機端卻拒絕它
 
-下一個錯誤是：
+第一個問題確認後，我先停止讓 Tailscale Serve 把請求送回 Mini 自己的 Tailscale 位址，改交給 Mini 的本機服務。這次 HTTP 終於有回應：請求確實進了 Mac Mini，也找到了 Hermes。
+
+不過 Hermes 馬上回了：
 
 ```text
 Invalid Host header
 ```
 
-白話來說，Hermes 當時被設定成只接受「這台 Mini 自己」送來的請求；但經過 Tailscale Serve 轉送後，請求帶著另一個外部網址名稱。Hermes 覺得來訪者報的地址不對，所以把門關上。
+白話來說，路走對了，主機端卻不認得這個來訪者。
 
-一開始很容易把它當成麻煩的限制，想直接關掉。但這其實是安全保護：一個只打算給本機用的服務，不應該隨便接受任何網址名稱帶來的請求。
+原因是 Hermes 當時只待在 Mini 的本機位址 `127.0.0.1`。它只預期收到「Mini 自己」的地址；但 Tailscale Serve 轉送過來的請求，帶的是外部的 Tailscale 網址名稱。Hermes 看到兩個地址不一致，就把門關上。
 
-這裡的解法不是只把這個檢查關掉，也不是單純把 Tailscale Serve 拔掉而已。關鍵是把「服務待的地方」和「MacBook 要找的地址」改成同一個地方。
+這個檢查不能直接拿掉。它是安全保護：原本只打算給本機使用的服務，不應該因為有人換了一個網址名稱，就接受任何來源的請求。
 
-原本的狀況是：Hermes 只待在 Mini 的本機位址 `127.0.0.1`，卻要透過 Tailscale Serve 接待一個來自外部網址的請求。它看到地址不一致，於是拒絕。
-
-最後改成：Hermes 直接待在 Mini 的 Tailscale IP；MacBook 也直接用同一個 Tailscale IP 找它。兩邊報的是同一個地址，Hermes 就知道這是它該接受的請求。
-
-```text
-原本：Hermes 只認得「Mini 自己」的本機地址
-      MacBook 經 Serve 帶來「另一個外部地址」
-      → Hermes 拒絕
-
-最後：Hermes 聽在 Mini 的 Tailscale 地址
-      MacBook 也連 Mini 的 Tailscale 地址
-      → 地址一致，Hermes 接受
-```
-
-當時也有比較粗暴的做法，例如把服務改成接受整個家用 LAN 的連線，或略過這個檢查。它們可能能讓錯誤消失，但也把管理入口開得比需求更大。既然 Tailscale 已經提供一條可由 tailnet 規則控管的私有路徑，我選擇讓 Hermes 直接待在那條路上，而不是放寬它原本的保護。
-
-這也是為什麼最後會做兩件事：移除不需要的 Tailscale Serve，並把 Hermes 改綁到 Tailscale IP。前者讓路徑變短；後者才是第二個錯誤真正被解掉的原因。
+看似簡單的做法是直接把服務改成接受整個家用 LAN 的連線，或略過這個檢查。雖然錯誤可能會消失，但管理入口也會開得比需求更大。既然 Tailscale 已經提供一條可由 tailnet 規則控管的私有路徑，比較好的解法是讓 Hermes 直接待在那條路上。
 
 ## 第二次調整：讓 MacBook 直接走 Tailscale 到 Mini
 
@@ -105,6 +91,18 @@ MacBook 的 Hermes Desktop
 ```text
 Mac Mini：hermes serve --host <TAILSCALE_IP> --port 9119 --no-open
 MacBook：Remote gateway = http://<TAILSCALE_IP>:9119
+```
+
+原本與最後的差別是：
+
+```text
+原本：Hermes 只認得「Mini 自己」的本機地址
+      MacBook 經 Serve 帶來「另一個外部地址」
+      → Hermes 拒絕
+
+最後：Hermes 聽在 Mini 的 Tailscale 地址
+      MacBook 也連 Mini 的 Tailscale 地址
+      → 地址一致，Hermes 接受
 ```
 
 這次路徑短了，也剛好解掉前面兩個問題：
