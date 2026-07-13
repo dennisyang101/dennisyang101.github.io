@@ -16,7 +16,9 @@ Hermes Agent 平常跑在家裡的 Mac Mini。那台機器不會帶出門，但�
 
 這件事有兩個前提。第一，不能為了方便就開 router port，讓管理介面直接面對網際網路。第二，MacBook 只是入口，真正跑 agent 和處理檔案的地方仍然是 Mac Mini。
 
-查了一輪後，我選 Tailscale。兩台 Mac 已經在同一個 Tailscale tailnet 裡，它提供一個加密的私有網路；MacBook 可以安全地找到 Mini，但外面的陌生裝置不會因此看到 Mini 的 Hermes 服務。
+調研一輪後，我選 Tailscale。兩台 Mac 已經在同一個 Tailscale tailnet 裡，它提供一個加密的私有網路；MacBook 可以安全地找到 Mini，但外面的陌生裝置不會因此看到 Mini 的 Hermes 服務。
+
+連線方向是 MacBook 找 Mini：MacBook 必須在同一個 tailnet 裡，而 Mini 的 Hermes 必須只聽自己的 Tailscale IP。如此一來，MacBook 找得到 Mini，Mini 也只會接受從這條私有網路進來的連線。
 
 我原本以為這只是填一個遠端網址的事。最後倒也沒有變成很大的工程，不過中間改了兩次 Mac Mini 的設定，才搞懂每一層到底在做什麼。
 
@@ -30,7 +32,7 @@ Mini 原本有一個 `hermes gateway` 在跑，它負責 Discord 和 cron 這類
 
 所以第一個調整，是在 Mini 上另外讓 `hermes serve` 常駐，並交給 launchd 管理。到這裡，MacBook 至少有一個正確的目標可以連。
 
-接著我用了 Tailscale Serve。它可以理解成一個接待台：MacBook 先連到這個 HTTPS 入口，接待台再把請求轉交給後面的 `hermes serve`。
+接著我開始處理 Tailscale Serve。它是 Tailscale 提供的反向代理功能，可以理解成一個接待台：MacBook 先連到這個 HTTPS 入口，接待台再把請求轉交給後面的 `hermes serve`。我當時想藉它提供一個看起來較標準的 HTTPS 網址。
 
 ```text
 MacBook 的 Hermes Desktop
@@ -66,9 +68,25 @@ Invalid Host header
 
 一開始很容易把它當成麻煩的限制，想直接關掉。但這其實是安全保護：一個只打算給本機用的服務，不應該隨便接受任何網址名稱帶來的請求。
 
-當時也有比較粗暴的做法，例如把服務改成接受整個家用 LAN 的連線，或略過這個檢查。它們可能能讓錯誤消失，但也把管理入口開得比需求更大。這不是我想換來的方便。
+這裡的解法不是只把這個檢查關掉，也不是單純把 Tailscale Serve 拔掉而已。關鍵是把「服務待的地方」和「MacBook 要找的地址」改成同一個地方。
 
-於是沒有再補設定，而是把不必要的那一層拿掉。
+原本的狀況是：Hermes 只待在 Mini 的本機位址 `127.0.0.1`，卻要透過 Tailscale Serve 接待一個來自外部網址的請求。它看到地址不一致，於是拒絕。
+
+最後改成：Hermes 直接待在 Mini 的 Tailscale IP；MacBook 也直接用同一個 Tailscale IP 找它。兩邊報的是同一個地址，Hermes 就知道這是它該接受的請求。
+
+```text
+原本：Hermes 只認得「Mini 自己」的本機地址
+      MacBook 經 Serve 帶來「另一個外部地址」
+      → Hermes 拒絕
+
+最後：Hermes 聽在 Mini 的 Tailscale 地址
+      MacBook 也連 Mini 的 Tailscale 地址
+      → 地址一致，Hermes 接受
+```
+
+當時也有比較粗暴的做法，例如把服務改成接受整個家用 LAN 的連線，或略過這個檢查。它們可能能讓錯誤消失，但也把管理入口開得比需求更大。既然 Tailscale 已經提供一條可由 tailnet 規則控管的私有路徑，我選擇讓 Hermes 直接待在那條路上，而不是放寬它原本的保護。
+
+這也是為什麼最後會做兩件事：移除不需要的 Tailscale Serve，並把 Hermes 改綁到 Tailscale IP。前者讓路徑變短；後者才是第二個錯誤真正被解掉的原因。
 
 ## 第二次調整：讓 MacBook 直接走 Tailscale 到 Mini
 
@@ -93,15 +111,14 @@ MacBook：Remote gateway = http://<TAILSCALE_IP>:9119
 
 - 請求不再經過多餘的接待台，不會繞回 Mini 自己。
 - Desktop 使用的網址和 Mini 服務監聽的網址一致，Hermes 不會再把它誤認成不該接受的請求。
-- 服務只出現在 Tailscale 私有網路，不會被家用 LAN 或公網上的裝置碰到。
 
-網址雖然寫成 `http://`，但資料並不是直接裸露在網際網路上。兩台機器之間仍然走 Tailscale 的 WireGuard 加密通道。這個情境下，再多加一層反向代理和 TLS，沒有解決實際問題，反而多了一個可能壞掉的地方。
+網址雖然寫成 `http://`，但資料不是直接經過公網傳送；它仍在 Tailscale 的私有連線中。這個情境下，再多加一層反向代理和 TLS，沒有解決實際問題，反而多了一個可能壞掉的地方。
 
-## 私有網路之外，還是要登入
+## 這樣直接連，安全嗎？
 
-Tailscale 限制的是「哪些裝置能靠近 Mini」，但我還是保留 Hermes 的 Basic Auth。Desktop 會顯示一般的帳密登入表單，登入後才建立即時連線。
+前提是兩台裝置都已加入同一個 Tailscale tailnet，而且 tailnet 的存取規則只允許應該連線的裝置。這條路徑沒有 router port forwarding，也不把 `hermes serve` 綁到 `0.0.0.0`；它只聽 Mini 的 Tailscale IP。因此家用 LAN 上其他裝置和公網使用者都不會看到這個服務。
 
-這樣分工很清楚：Tailscale 保護網路邊界，Basic Auth 保護 Hermes 本身。就算 MacBook 是已授權的裝置，打開 Hermes 前仍要登入。
+傳輸層由 Tailscale 的 WireGuard 加密，Hermes 本身則保留 Basic Auth。前者保護 MacBook 到 Mini 的網路路徑，後者保護實際進入 Hermes 的人，因此 Desktop 仍會顯示帳密登入表單。這也是我沒有為了排錯關掉登入，或改成對整個 LAN 開放服務的原因。
 
 ## 最後怎麼知道它真的好了
 
