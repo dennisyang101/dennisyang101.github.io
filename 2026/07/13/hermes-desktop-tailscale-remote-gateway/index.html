@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  
+  <title>讓 MacBook 在外面也能用家裡的 Hermes Agent | Dennis Yang</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta name="description" content="Hermes Agent 平常跑在家裡的 Mac Mini。那台機器不會帶出門，但它保留了我平常使用的環境：模型設定、工作檔案、terminal、skills 和 cron 都在那裡。 出門時我帶的是 MacBook。於是有一件事一直有點卡：明明 Mini 在家裡正常跑著，MacBook 卻只能算另一台乾淨的電腦。我要的不是再裝一套 Hermes，也不是把檔案複製到兩邊；我只想在外面打開 MacB">
+<meta property="og:type" content="article">
+<meta property="og:title" content="讓 MacBook 在外面也能用家裡的 Hermes Agent">
+<meta property="og:url" content="https://dennisyang101.github.io/2026/07/13/hermes-desktop-tailscale-remote-gateway/index.html">
+<meta property="og:site_name" content="Dennis Yang">
+<meta property="og:description" content="Hermes Agent 平常跑在家裡的 Mac Mini。那台機器不會帶出門，但它保留了我平常使用的環境：模型設定、工作檔案、terminal、skills 和 cron 都在那裡。 出門時我帶的是 MacBook。於是有一件事一直有點卡：明明 Mini 在家裡正常跑著，MacBook 卻只能算另一台乾淨的電腦。我要的不是再裝一套 Hermes，也不是把檔案複製到兩邊；我只想在外面打開 MacB">
+<meta property="og:locale" content="zh_TW">
+<meta property="og:image" content="https://dennisyang101.github.io/images/hermes-tailscale-serve-removal.svg">
+<meta property="article:published_time" content="2026-07-13T11:42:37.000Z">
+<meta property="article:modified_time" content="2026-07-13T13:05:40.470Z">
+<meta property="article:author" content="Dennis Yang">
+<meta property="article:tag" content="Hermes">
+<meta property="article:tag" content="Tailscale">
+<meta property="article:tag" content="macOS">
+<meta property="article:tag" content="遠端連線">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://dennisyang101.github.io/images/hermes-tailscale-serve-removal.svg">
+  
+    <link rel="alternate" href="/atom.xml" title="Dennis Yang" type="application/atom+xml">
+  
+  
+    <link rel="shortcut icon" href="/favicon.png">
+  
+  
+  
+<link rel="stylesheet" href="/css/style.css">
+
+  
+    
+<link rel="stylesheet" href="/fancybox/jquery.fancybox.min.css">
+
+  
+  
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fork-awesome@1.2.0/css/fork-awesome.min.css">
+
+<meta name="generator" content="Hexo 8.1.2"></head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Dennis Yang</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"><span class="fa fa-bars"></span></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+        
+          <a class="nav-icon" href="/atom.xml" title="RSS Feed"><span class="fa fa-rss"></span></a>
+        
+        <a class="nav-icon nav-search-btn" title="搜尋"><span class="fa fa-search"></span></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="搜尋"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="https://dennisyang101.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+
+      <div class="outer">
+        <section id="main"><article id="post-hermes-desktop-tailscale-remote-gateway" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/2026/07/13/hermes-desktop-tailscale-remote-gateway/" class="article-date">
+  <time class="dt-published" datetime="2026-07-13T11:42:37.000Z" itemprop="datePublished">2026-07-13</time>
+</a>
+    
+  <div class="article-category">
+    <a class="article-category-link" href="/categories/%E6%8A%80%E8%A1%93%E7%AD%86%E8%A8%98/">技術筆記</a>
+  </div>
+
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="p-name article-title" itemprop="headline name">
+      讓 MacBook 在外面也能用家裡的 Hermes Agent
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <p>Hermes Agent 平常跑在家裡的 Mac Mini。那台機器不會帶出門，但它保留了我平常使用的環境：模型設定、工作檔案、terminal、skills 和 cron 都在那裡。</p>
+<p>出門時我帶的是 MacBook。於是有一件事一直有點卡：明明 Mini 在家裡正常跑著，MacBook 卻只能算另一台乾淨的電腦。我要的不是再裝一套 Hermes，也不是把檔案複製到兩邊；我只想在外面打開 MacBook 的 Hermes Desktop，繼續操作家裡那個 Hermes。</p>
+<p>這件事有兩個前提。第一，不能為了方便就開 router port，讓管理介面直接面對網際網路。第二，MacBook 只是入口，真正跑 agent 和處理檔案的地方仍然是 Mac Mini。</p>
+<p>調研一輪後，我選 Tailscale。兩台 Mac 已經在同一個 Tailscale tailnet 裡，它提供一個加密的私有網路；MacBook 可以安全地找到 Mini，但外面的陌生裝置不會因此看到 Mini 的 Hermes 服務。</p>
+<p>連線方向是 MacBook 找 Mini：MacBook 必須在同一個 tailnet 裡，而 Mini 的 Hermes 必須只聽自己的 Tailscale IP。如此一來，MacBook 找得到 Mini，Mini 也只會接受從這條私有網路進來的連線。</p>
+<p>我原本以為這只是填一個遠端網址的事。最後倒也沒有變成很大的工程，不過中間改了兩次 Mac Mini 的設定，才搞懂每一層到底在做什麼。</p>
+<h2 id="一開始先連錯了服務"><a href="#一開始先連錯了服務" class="headerlink" title="一開始先連錯了服務"></a>一開始先連錯了服務</h2><p>Mini 原本有一個 <code>hermes gateway</code> 在跑，它負責 Discord 和 cron 這類訊息通道。我先入為主地以為 Hermes Desktop 也是連它。</p>
+<p>實際上不是。Desktop 的 <strong>Remote gateway</strong> 要連的是 <code>hermes serve</code>。</p>
+<p>可以把兩者想成不同的門：<code>hermes gateway</code> 是 Hermes 收發外部訊息的門；<code>hermes serve</code> 才是讓 Desktop 打開介面、建立即時連線的門。名字很像，功能完全不同。</p>
+<p>所以第一個調整，是在 Mini 上另外讓 <code>hermes serve</code> 常駐，並交給 launchd 管理。到這裡，MacBook 至少有一個正確的目標可以連。</p>
+<p>接著我開始處理 Tailscale Serve。它是 Tailscale 提供的反向代理功能，可以理解成一個接待台：MacBook 先連到這個 HTTPS 入口，接待台再把請求轉交給後面的 <code>hermes serve</code>。我當時想藉它提供一個看起來較標準的 HTTPS 網址。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">MacBook 的 Hermes Desktop</span><br><span class="line">  → Tailscale Serve</span><br><span class="line">  → Mac Mini 上的 hermes serve</span><br></pre></td></tr></table></figure>
+
+<p>看起來比直接開服務更完整，也有 HTTPS；但第一個問題就是從這裡開始的。</p>
+<h2 id="第一次卡住：看起來都通，Hermes-卻沒回話"><a href="#第一次卡住：看起來都通，Hermes-卻沒回話" class="headerlink" title="第一次卡住：看起來都通，Hermes 卻沒回話"></a>第一次卡住：看起來都通，Hermes 卻沒回話</h2><p>MacBook 端當時其實有不少好消息：Tailscale 顯示 Mini 在線、443 port 有反應，TLS handshake 也成功。照這些訊號看，像是已經連上了。</p>
+<p>但真正用 Desktop 打開服務時，它一直等不到 Hermes 的回應。入口有亮，後面卻沒有人開門。</p>
+<p>後來回頭看設定，才發現我把路繞複雜了。Tailscale Serve 已經把請求帶到 Mac Mini，卻又被設定成轉送到 Mini 自己的 Tailscale 位址。等於訪客已經走到門口，又被請去繞社區一圈，再回到同一扇門。這條繞路在我的設定裡沒有成功，Hermes 因此根本沒有收到請求。</p>
+<p><img src="/images/hermes-tailscale-serve-removal.svg" alt="移除 Tailscale Serve 前後的連線路徑"></p>
+<p>我先把轉送目標改成 <code>127.0.0.1:9119</code>，也就是 Mini 自己的本機位址。這次終於拿到 HTTP 回應，證明請求有進到 Hermes；下一個錯誤隨即出現。</p>
+<p>這一段學到的是：看到網路通了，不代表功能真的可用。還是得確認最末端的服務有收到請求、有回應。</p>
+<h2 id="第二次卡住：請求終於到了，主機端卻拒絕它"><a href="#第二次卡住：請求終於到了，主機端卻拒絕它" class="headerlink" title="第二次卡住：請求終於到了，主機端卻拒絕它"></a>第二次卡住：請求終於到了，主機端卻拒絕它</h2><p>第一個問題確認後，我先停止讓 Tailscale Serve 把請求送回 Mini 自己的 Tailscale 位址，改交給 Mini 的本機服務。這次 HTTP 終於有回應：請求確實進了 Mac Mini，也找到了 Hermes。</p>
+<p>不過 Hermes 馬上回了：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Invalid Host header</span><br></pre></td></tr></table></figure>
+
+<p>白話來說，路走對了，主機端卻不認得這個來訪者。</p>
+<p>原因是 Hermes 當時只待在 Mini 的本機位址 <code>127.0.0.1</code>。它只預期收到「Mini 自己」的地址；但 Tailscale Serve 轉送過來的請求，帶的是外部的 Tailscale 網址名稱。Hermes 看到兩個地址不一致，就把門關上。</p>
+<p>這個檢查不能直接拿掉。它是安全保護：原本只打算給本機使用的服務，不應該因為有人換了一個網址名稱，就接受任何來源的請求。</p>
+<p>看似簡單的做法是直接把服務改成接受整個家用 LAN 的連線，或略過這個檢查。雖然錯誤可能會消失，但管理入口也會開得比需求更大。既然 Tailscale 已經提供一條可由 tailnet 規則控管的私有路徑，比較好的解法是讓 Hermes 直接待在那條路上。</p>
+<h2 id="第二次調整：讓-MacBook-直接走-Tailscale-到-Mini"><a href="#第二次調整：讓-MacBook-直接走-Tailscale-到-Mini" class="headerlink" title="第二次調整：讓 MacBook 直接走 Tailscale 到 Mini"></a>第二次調整：讓 MacBook 直接走 Tailscale 到 Mini</h2><p>既然 MacBook 和 Mini 已經在同一個私有網路，Tailscale Serve 其實不是必要的中間人。</p>
+<p>最後做法是：Mini 上的 <code>hermes serve</code> 只綁定自己的 Tailscale IP，MacBook Desktop 也直接連那個 IP。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">MacBook 的 Hermes Desktop</span><br><span class="line">  → Tailscale 加密私有網路</span><br><span class="line">  → Mac Mini 的 hermes serve</span><br></pre></td></tr></table></figure>
+
+<p>概念上的設定只有兩件事：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Mac Mini：hermes serve --host &lt;TAILSCALE_IP&gt; --port 9119 --no-open</span><br><span class="line">MacBook：Remote gateway = http://&lt;TAILSCALE_IP&gt;:9119</span><br></pre></td></tr></table></figure>
+
+<p>原本與最後的差別是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">原本：Hermes 只認得「Mini 自己」的本機地址</span><br><span class="line">      MacBook 經 Serve 帶來「另一個外部地址」</span><br><span class="line">      → Hermes 拒絕</span><br><span class="line"></span><br><span class="line">最後：Hermes 聽在 Mini 的 Tailscale 地址</span><br><span class="line">      MacBook 也連 Mini 的 Tailscale 地址</span><br><span class="line">      → 地址一致，Hermes 接受</span><br></pre></td></tr></table></figure>
+
+<p>這次路徑短了，也剛好解掉前面兩個問題：</p>
+<ul>
+<li>請求不再經過多餘的接待台，不會繞回 Mini 自己。</li>
+<li>Desktop 使用的網址和 Mini 服務監聽的網址一致，Hermes 不會再把它誤認成不該接受的請求。</li>
+</ul>
+<p>網址雖然寫成 <code>http://</code>，但資料不是直接經過公網傳送；它仍在 Tailscale 的私有連線中。這個情境下，再多加一層反向代理和 TLS，沒有解決實際問題，反而多了一個可能壞掉的地方。</p>
+<h2 id="這樣直接連，安全嗎？"><a href="#這樣直接連，安全嗎？" class="headerlink" title="這樣直接連，安全嗎？"></a>這樣直接連，安全嗎？</h2><p>前提是兩台裝置都已加入同一個 Tailscale tailnet，而且 tailnet 的存取規則只允許應該連線的裝置。這條路徑沒有 router port forwarding，也不把 <code>hermes serve</code> 綁到 <code>0.0.0.0</code>；它只聽 Mini 的 Tailscale IP。因此家用 LAN 上其他裝置和公網使用者都不會看到這個服務。</p>
+<p>傳輸層由 Tailscale 的 WireGuard 加密，Hermes 本身則保留 Basic Auth。前者保護 MacBook 到 Mini 的網路路徑，後者保護實際進入 Hermes 的人，因此 Desktop 仍會顯示帳密登入表單。這也是我沒有為了排錯關掉登入，或改成對整個 LAN 開放服務的原因。</p>
+<h2 id="最後怎麼知道它真的好了"><a href="#最後怎麼知道它真的好了" class="headerlink" title="最後怎麼知道它真的好了"></a>最後怎麼知道它真的好了</h2><p>最後的驗證不是只看 ping 通，而是拿 MacBook 實際走完一次使用流程：</p>
+<ol>
+<li>Hermes Desktop 找得到 Mini，並顯示登入表單。</li>
+<li>輸入帳密後可以儲存設定並重新連線。</li>
+<li>Desktop 顯示已連上，也能正常操作 Mini 上的 Hermes。</li>
+</ol>
+<p>技術上，最後的即時連線完成了 WebSocket upgrade，收到了 <code>101 Switching Protocols</code> 和 <code>gateway.ready</code>。這代表整條路真的接通；一般使用時，只要 Desktop 能正常連上並工作就夠了。</p>
+<p>最後留下來的東西比一開始想像的少：Tailscale、只綁 Tailscale IP 的 <code>hermes serve</code>，以及登入保護。沒有 port forwarding，沒有公開的管理介面，也沒有不必要的反向代理。</p>
+<p>這次比較有意思的不是某個指令，而是過程裡一直在做同一件事：每多一層設定，就多一個可能出錯的位置。既然兩台 Mac 已經在同一個安全的私有網路裡，直接連反而是最穩、也最容易維護的方案。</p>
+<details>
+<summary>技術備註：第二次錯誤的原因</summary>
+
+<p><code>hermes serve</code> 綁在 <code>127.0.0.1</code> 時，只接受 <code>localhost</code> 或 <code>127.0.0.1</code> 這類本機 Host header。Tailscale Serve 轉送時保留外部的 Tailscale hostname，因此觸發 Hermes 的 Host header／DNS rebinding 防護。</p>
+</details>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://dennisyang101.github.io/2026/07/13/hermes-desktop-tailscale-remote-gateway/" data-id="cuidHQPfRoMqijZg6GWPOjpYm" data-title="讓 MacBook 在外面也能用家裡的 Hermes Agent" class="article-share-link"><span class="fa fa-share">Share</span></a>
+      
+      
+      
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Hermes/" rel="tag">Hermes</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Tailscale/" rel="tag">Tailscale</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/macOS/" rel="tag">macOS</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E9%81%A0%E7%AB%AF%E9%80%A3%E7%B7%9A/" rel="tag">遠端連線</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+    <a href="/2026/07/18/terraform-passed-but-deployment-had-not-started/" id="article-nav-newer" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Newer</strong>
+      <div class="article-nav-title">
+        
+          Terraform 通過之後，部署其實才剛開始
+        
+      </div>
+    </a>
+  
+  
+    <a href="/2026/07/09/hello-world/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">用 Hexo 部署第一篇文章到 GitHub Pages</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">分類</h3>
+    <div class="widget">
+      <ul class="category-list"><li class="category-list-item"><a class="category-list-link" href="/categories/%E6%8A%80%E8%A1%93%E7%AD%86%E8%A8%98/">技術筆記</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">標籤</h3>
+    <div class="widget">
+      <ul class="tag-list" itemprop="keywords"><li class="tag-list-item"><a class="tag-list-link" href="/tags/AWS/" rel="tag">AWS</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/GitHub-Actions/" rel="tag">GitHub Actions</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/GitHub-Pages/" rel="tag">GitHub Pages</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/HTTP-3/" rel="tag">HTTP&#x2F;3</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Hermes/" rel="tag">Hermes</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Hexo/" rel="tag">Hexo</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/OIDC/" rel="tag">OIDC</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Palworld/" rel="tag">Palworld</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/QUIC/" rel="tag">QUIC</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tailscale/" rel="tag">Tailscale</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Terraform/" rel="tag">Terraform</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/UDP/" rel="tag">UDP</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/macOS/" rel="tag">macOS</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/%E7%B6%B2%E8%B7%AF%E5%8D%94%E8%AD%B0/" rel="tag">網路協議</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/%E9%81%A0%E7%AB%AF%E9%80%A3%E7%B7%9A/" rel="tag">遠端連線</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">標籤雲</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/AWS/" style="font-size: 10px;">AWS</a> <a href="/tags/GitHub-Actions/" style="font-size: 10px;">GitHub Actions</a> <a href="/tags/GitHub-Pages/" style="font-size: 10px;">GitHub Pages</a> <a href="/tags/HTTP-3/" style="font-size: 10px;">HTTP/3</a> <a href="/tags/Hermes/" style="font-size: 10px;">Hermes</a> <a href="/tags/Hexo/" style="font-size: 10px;">Hexo</a> <a href="/tags/OIDC/" style="font-size: 10px;">OIDC</a> <a href="/tags/Palworld/" style="font-size: 10px;">Palworld</a> <a href="/tags/QUIC/" style="font-size: 10px;">QUIC</a> <a href="/tags/Tailscale/" style="font-size: 10px;">Tailscale</a> <a href="/tags/Terraform/" style="font-size: 10px;">Terraform</a> <a href="/tags/UDP/" style="font-size: 10px;">UDP</a> <a href="/tags/macOS/" style="font-size: 10px;">macOS</a> <a href="/tags/%E7%B6%B2%E8%B7%AF%E5%8D%94%E8%AD%B0/" style="font-size: 10px;">網路協議</a> <a href="/tags/%E9%81%A0%E7%AB%AF%E9%80%A3%E7%B7%9A/" style="font-size: 10px;">遠端連線</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">彙整</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2026/07/">七月 2026</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2025/07/">七月 2025</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">最新文章</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2026/07/18/terraform-passed-but-deployment-had-not-started/">Terraform 通過之後，部署其實才剛開始</a>
+          </li>
+        
+          <li>
+            <a href="/2026/07/13/hermes-desktop-tailscale-remote-gateway/">讓 MacBook 在外面也能用家裡的 Hermes Agent</a>
+          </li>
+        
+          <li>
+            <a href="/2026/07/09/hello-world/">用 Hexo 部署第一篇文章到 GitHub Pages</a>
+          </li>
+        
+          <li>
+            <a href="/2025/07/14/tcp-and-udp/">HTTP/3 為什麼跑在 UDP 上，卻還是可靠？</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      
+      &copy; 2026 Dennis Yang<br>
+      Powered by <a href="https://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+
+<script src="/js/jquery-3.6.4.min.js"></script>
+
+
+
+  
+<script src="/fancybox/jquery.fancybox.min.js"></script>
+
+
+
+
+<script src="/js/script.js"></script>
+
+
+
+
+
+  </div>
+</body>
+</html>

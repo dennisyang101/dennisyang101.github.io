@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  
+  <title>HTTP/3 為什麼跑在 UDP 上，卻還是可靠？ | Dennis Yang</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta name="description" content="HTTP&#x2F;3 使用 UDP，不代表網頁傳輸放棄可靠性。可靠傳輸、加密與壅塞控制由 QUIC 處理，而 UDP 是它承載封包的方式。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="HTTP&#x2F;3 為什麼跑在 UDP 上，卻還是可靠？">
+<meta property="og:url" content="https://dennisyang101.github.io/2025/07/14/tcp-and-udp/index.html">
+<meta property="og:site_name" content="Dennis Yang">
+<meta property="og:description" content="HTTP&#x2F;3 使用 UDP，不代表網頁傳輸放棄可靠性。可靠傳輸、加密與壅塞控制由 QUIC 處理，而 UDP 是它承載封包的方式。">
+<meta property="og:locale" content="zh_TW">
+<meta property="article:published_time" content="2025-07-14T04:00:00.000Z">
+<meta property="article:modified_time" content="2026-07-14T14:16:54.997Z">
+<meta property="article:author" content="Dennis Yang">
+<meta property="article:tag" content="HTTP&#x2F;3">
+<meta property="article:tag" content="QUIC">
+<meta property="article:tag" content="UDP">
+<meta property="article:tag" content="網路協議">
+<meta name="twitter:card" content="summary">
+  
+    <link rel="alternate" href="/atom.xml" title="Dennis Yang" type="application/atom+xml">
+  
+  
+    <link rel="shortcut icon" href="/favicon.png">
+  
+  
+  
+<link rel="stylesheet" href="/css/style.css">
+
+  
+    
+<link rel="stylesheet" href="/fancybox/jquery.fancybox.min.css">
+
+  
+  
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fork-awesome@1.2.0/css/fork-awesome.min.css">
+
+<meta name="generator" content="Hexo 8.1.2"></head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Dennis Yang</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"><span class="fa fa-bars"></span></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+        
+          <a class="nav-icon" href="/atom.xml" title="RSS Feed"><span class="fa fa-rss"></span></a>
+        
+        <a class="nav-icon nav-search-btn" title="搜尋"><span class="fa fa-search"></span></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="搜尋"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="https://dennisyang101.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+
+      <div class="outer">
+        <section id="main"><article id="post-tcp-and-udp" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/2025/07/14/tcp-and-udp/" class="article-date">
+  <time class="dt-published" datetime="2025-07-14T04:00:00.000Z" itemprop="datePublished">2025-07-14</time>
+</a>
+    
+  <div class="article-category">
+    <a class="article-category-link" href="/categories/%E6%8A%80%E8%A1%93%E7%AD%86%E8%A8%98/">技術筆記</a>
+  </div>
+
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="p-name article-title" itemprop="headline name">
+      HTTP/3 為什麼跑在 UDP 上，卻還是可靠？
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <p>以前剛學 TCP 和 UDP 時，很容易把它們記成二選一：TCP 可靠但慢，UDP 快但可能丟資料。</p>
+<p>這個說法作為入門沒有錯，但放到現在的網路上已經不太夠用了。因為 HTTP&#x2F;3 是建立在 QUIC 上，而 QUIC 的封包正是走 UDP。照舊印象來看，網頁怎麼會願意把 HTML、圖片和登入資料交給「可能丟包」的 UDP？</p>
+<p>關鍵是：<strong>HTTP&#x2F;3 不是直接把網頁內容裸丟進 UDP。</strong> UDP 只負責把 QUIC 封包送到另一端；可靠傳輸、排序、流量控制、壅塞控制和加密，則由 QUIC 自己處理。</p>
+<h2 id="UDP-不可靠，QUIC-仍然可以可靠"><a href="#UDP-不可靠，QUIC-仍然可以可靠" class="headerlink" title="UDP 不可靠，QUIC 仍然可以可靠"></a>UDP 不可靠，QUIC 仍然可以可靠</h2><p>UDP 本身很單純。它送出一個 datagram，沒有連線狀態，也不承諾對方一定收到、一定照原本順序收到。</p>
+<p>QUIC 選擇用 UDP 當底層封包格式，但在上面補回網頁傳輸需要的能力：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">HTTP/3</span><br><span class="line">  ↓</span><br><span class="line">QUIC：stream、遺失偵測、重傳、壅塞控制、TLS 1.3</span><br><span class="line">  ↓</span><br><span class="line">UDP：把 QUIC 封包送到網路上</span><br><span class="line">  ↓</span><br><span class="line">IP</span><br></pre></td></tr></table></figure>
+
+<p>所以「HTTP&#x2F;3 用 UDP」不等於「HTTP&#x2F;3 不可靠」。比較接近的說法是：QUIC 不借用 TCP 已有的可靠傳輸機制，而是自己在 UDP 之上實作一套。</p>
+<p><a target="_blank" rel="noopener" href="https://www.rfc-editor.org/rfc/rfc9000.html">IETF 的 QUIC 標準 RFC 9000</a> 明確定義了遺失偵測、復原和壅塞控制所需的回饋機制；HTTP&#x2F;3 則依賴 QUIC 提供每條 stream 內可靠且有順序的傳輸。<a target="_blank" rel="noopener" href="https://www.rfc-editor.org/rfc/rfc9114.html">RFC 9114</a> 也把這件事寫得很直接：HTTP&#x2F;3 的可靠性是在 QUIC 的 stream 層，而不是 UDP 本身。</p>
+<h2 id="要解的不是「TCP-太慢」，而是一個封包拖住全部請求"><a href="#要解的不是「TCP-太慢」，而是一個封包拖住全部請求" class="headerlink" title="要解的不是「TCP 太慢」，而是一個封包拖住全部請求"></a>要解的不是「TCP 太慢」，而是一個封包拖住全部請求</h2><p>HTTP&#x2F;2 已經能讓多個請求共用一條 TCP 連線。瀏覽器可以同時請 HTML、CSS、JavaScript 和圖片，不必像 HTTP&#x2F;1.1 那樣開很多 TCP 連線。</p>
+<p>問題在於 TCP 只看得見一條按順序排列的位元組串流。假設其中一個 TCP 封包遺失，後面的資料即使已經到達，TCP 仍要先等遺失的部分補回來。這會讓同一條連線上的其他 HTTP&#x2F;2 請求一起停住，稱為 transport-layer head-of-line blocking。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">HTTP/2 over TCP</span><br><span class="line"></span><br><span class="line">CSS 的封包遺失</span><br><span class="line">  ↓</span><br><span class="line">TCP 等待重傳，維持整條位元組串流順序</span><br><span class="line">  ↓</span><br><span class="line">同一條連線上的圖片、JavaScript 回應也得等</span><br></pre></td></tr></table></figure>
+
+<p>這不是說 HTTP&#x2F;2 沒有多工；它有。問題是 HTTP&#x2F;2 的多工在 TCP 上面，但 TCP 不知道哪些位元組屬於哪個 HTTP 請求。</p>
+<p>QUIC 把 stream 放到傳輸層。HTTP&#x2F;3 的每個請求可以使用獨立的 QUIC stream；某條 stream 的封包遺失時，那條 stream 仍須等待重傳，但不必把其他 stream 一起卡住。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">HTTP/3 over QUIC over UDP</span><br><span class="line"></span><br><span class="line">CSS 所在的 stream 有封包遺失</span><br><span class="line">  ↓</span><br><span class="line">QUIC 只重傳那條 stream 缺少的資料</span><br><span class="line">  ↓</span><br><span class="line">其他 stream 仍可繼續交付已收到的資料</span><br></pre></td></tr></table></figure>
+
+<p>這是 HTTP&#x2F;3 選 QUIC 的主要理由之一。它不是讓丟包變得沒關係，而是把丟包造成的等待限制在受影響的 stream 裡。</p>
+<h2 id="QUIC-不只是在-UDP-上加一個重傳"><a href="#QUIC-不只是在-UDP-上加一個重傳" class="headerlink" title="QUIC 不只是在 UDP 上加一個重傳"></a>QUIC 不只是在 UDP 上加一個重傳</h2><p>如果只是重傳，QUIC 不會值得另外做成一套傳輸協定。它還把幾件原本分散在 TCP、TLS 和 HTTP&#x2F;2 的事情重新組合：</p>
+<ul>
+<li><strong>加密</strong>：QUIC 整合 TLS 1.3。HTTP&#x2F;3 不支援未加密的 QUIC 連線。</li>
+<li><strong>每條 stream 的流量控制</strong>：一個慢的接收端不應無限吃掉記憶體，也不該輕易影響其他 stream。</li>
+<li><strong>整條連線的壅塞控制</strong>：QUIC 仍然需要在網路塞車時降速，不能因為底層是 UDP 就任意送封包。</li>
+<li><strong>較快的重新連線條件</strong>：對曾連過的伺服器，QUIC 可使用 0-RTT 提早送資料；但這不是每次新連線都免費加速，伺服器也必須考慮重送攻擊風險。</li>
+<li><strong>連線遷移</strong>：裝置從 Wi‑Fi 切到行動網路時，QUIC 可以利用 connection ID 嘗試維持同一條連線；實際能否持續仍取決於雙方與網路狀況。</li>
+</ul>
+<p>因此，把 QUIC 稱為「UDP 的替代品」不太準確。它比較像一個新的傳輸層協定，只是選擇把自己的封包放進 UDP datagram 裡，讓它能在既有網路設備上部署。</p>
+<h2 id="那-TCP-和-UDP-還怎麼選？"><a href="#那-TCP-和-UDP-還怎麼選？" class="headerlink" title="那 TCP 和 UDP 還怎麼選？"></a>那 TCP 和 UDP 還怎麼選？</h2><p>對應用程式開發者來說，選擇通常仍然很簡單：大多數需要可靠雙向連線的程式，用 TCP 或現有的 HTTPS stack 就好。瀏覽器是否改用 HTTP&#x2F;3，主要是瀏覽器與伺服器協商的結果，不是網站前端要自己用 UDP socket 重寫。</p>
+<p>UDP 適合的情境仍然存在，例如 DNS、即時語音、遊戲的位置更新，或應用本來就能容忍少量過期資料。這些場合常常寧可漏掉一個舊封包，也不要等待它重傳。</p>
+<p>QUIC 則是另一種情況：它使用 UDP 的部署方式，但提供 HTTP 所需的可靠傳輸。它不能讓網路沒有遺失或延遲；它只是避免一個遺失封包把本來不相關的 HTTP 請求一起拖住。</p>
+<p>下次看到瀏覽器顯示 HTTP&#x2F;3 或 <code>h3</code> 時，可以把它想成這條路徑：UDP 在最底下送封包，QUIC 在中間負責可靠性與加密，HTTP&#x2F;3 才在最上面傳遞網頁請求。</p>
+<h2 id="參考資料"><a href="#參考資料" class="headerlink" title="參考資料"></a>參考資料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://www.rfc-editor.org/rfc/rfc9000.html">RFC 9000: QUIC: A UDP-Based Multiplexed and Secure Transport</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.rfc-editor.org/rfc/rfc9114.html">RFC 9114: HTTP&#x2F;3</a></li>
+</ul>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://dennisyang101.github.io/2025/07/14/tcp-and-udp/" data-id="cuidO1CwFcCkd3zYmVVOSwbu_" data-title="HTTP/3 為什麼跑在 UDP 上，卻還是可靠？" class="article-share-link"><span class="fa fa-share">Share</span></a>
+      
+      
+      
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/HTTP-3/" rel="tag">HTTP&#x2F;3</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/QUIC/" rel="tag">QUIC</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/UDP/" rel="tag">UDP</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E7%B6%B2%E8%B7%AF%E5%8D%94%E8%AD%B0/" rel="tag">網路協議</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+    <a href="/2026/07/09/hello-world/" id="article-nav-newer" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Newer</strong>
+      <div class="article-nav-title">
+        
+          用 Hexo 部署第一篇文章到 GitHub Pages
+        
+      </div>
+    </a>
+  
+  
+</nav>
+
+  
+</article>
+
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">分類</h3>
+    <div class="widget">
+      <ul class="category-list"><li class="category-list-item"><a class="category-list-link" href="/categories/%E6%8A%80%E8%A1%93%E7%AD%86%E8%A8%98/">技術筆記</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">標籤</h3>
+    <div class="widget">
+      <ul class="tag-list" itemprop="keywords"><li class="tag-list-item"><a class="tag-list-link" href="/tags/AWS/" rel="tag">AWS</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/GitHub-Actions/" rel="tag">GitHub Actions</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/GitHub-Pages/" rel="tag">GitHub Pages</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/HTTP-3/" rel="tag">HTTP&#x2F;3</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Hermes/" rel="tag">Hermes</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Hexo/" rel="tag">Hexo</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/OIDC/" rel="tag">OIDC</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Palworld/" rel="tag">Palworld</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/QUIC/" rel="tag">QUIC</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tailscale/" rel="tag">Tailscale</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Terraform/" rel="tag">Terraform</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/UDP/" rel="tag">UDP</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/macOS/" rel="tag">macOS</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/%E7%B6%B2%E8%B7%AF%E5%8D%94%E8%AD%B0/" rel="tag">網路協議</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/%E9%81%A0%E7%AB%AF%E9%80%A3%E7%B7%9A/" rel="tag">遠端連線</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">標籤雲</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/AWS/" style="font-size: 10px;">AWS</a> <a href="/tags/GitHub-Actions/" style="font-size: 10px;">GitHub Actions</a> <a href="/tags/GitHub-Pages/" style="font-size: 10px;">GitHub Pages</a> <a href="/tags/HTTP-3/" style="font-size: 10px;">HTTP/3</a> <a href="/tags/Hermes/" style="font-size: 10px;">Hermes</a> <a href="/tags/Hexo/" style="font-size: 10px;">Hexo</a> <a href="/tags/OIDC/" style="font-size: 10px;">OIDC</a> <a href="/tags/Palworld/" style="font-size: 10px;">Palworld</a> <a href="/tags/QUIC/" style="font-size: 10px;">QUIC</a> <a href="/tags/Tailscale/" style="font-size: 10px;">Tailscale</a> <a href="/tags/Terraform/" style="font-size: 10px;">Terraform</a> <a href="/tags/UDP/" style="font-size: 10px;">UDP</a> <a href="/tags/macOS/" style="font-size: 10px;">macOS</a> <a href="/tags/%E7%B6%B2%E8%B7%AF%E5%8D%94%E8%AD%B0/" style="font-size: 10px;">網路協議</a> <a href="/tags/%E9%81%A0%E7%AB%AF%E9%80%A3%E7%B7%9A/" style="font-size: 10px;">遠端連線</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">彙整</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2026/07/">七月 2026</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2025/07/">七月 2025</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">最新文章</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2026/07/18/terraform-passed-but-deployment-had-not-started/">Terraform 通過之後，部署其實才剛開始</a>
+          </li>
+        
+          <li>
+            <a href="/2026/07/13/hermes-desktop-tailscale-remote-gateway/">讓 MacBook 在外面也能用家裡的 Hermes Agent</a>
+          </li>
+        
+          <li>
+            <a href="/2026/07/09/hello-world/">用 Hexo 部署第一篇文章到 GitHub Pages</a>
+          </li>
+        
+          <li>
+            <a href="/2025/07/14/tcp-and-udp/">HTTP/3 為什麼跑在 UDP 上，卻還是可靠？</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      
+      &copy; 2026 Dennis Yang<br>
+      Powered by <a href="https://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+
+<script src="/js/jquery-3.6.4.min.js"></script>
+
+
+
+  
+<script src="/fancybox/jquery.fancybox.min.js"></script>
+
+
+
+
+<script src="/js/script.js"></script>
+
+
+
+
+
+  </div>
+</body>
+</html>

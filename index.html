@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  
+  <title>Dennis Yang</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta name="description" content="技術筆記、AI agent、量化交易與隨筆">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Dennis Yang">
+<meta property="og:url" content="https://dennisyang101.github.io/index.html">
+<meta property="og:site_name" content="Dennis Yang">
+<meta property="og:description" content="技術筆記、AI agent、量化交易與隨筆">
+<meta property="og:locale" content="zh_TW">
+<meta property="article:author" content="Dennis Yang">
+<meta name="twitter:card" content="summary">
+  
+    <link rel="alternate" href="/atom.xml" title="Dennis Yang" type="application/atom+xml">
+  
+  
+    <link rel="shortcut icon" href="/favicon.png">
+  
+  
+  
+<link rel="stylesheet" href="/css/style.css">
+
+  
+    
+<link rel="stylesheet" href="/fancybox/jquery.fancybox.min.css">
+
+  
+  
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fork-awesome@1.2.0/css/fork-awesome.min.css">
+
+<meta name="generator" content="Hexo 8.1.2"></head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Dennis Yang</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"><span class="fa fa-bars"></span></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+        
+          <a class="nav-icon" href="/atom.xml" title="RSS Feed"><span class="fa fa-rss"></span></a>
+        
+        <a class="nav-icon nav-search-btn" title="搜尋"><span class="fa fa-search"></span></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="搜尋"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="https://dennisyang101.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+
+      <div class="outer">
+        <section id="main">
+  
+    <article id="post-terraform-passed-but-deployment-had-not-started" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/2026/07/18/terraform-passed-but-deployment-had-not-started/" class="article-date">
+  <time class="dt-published" datetime="2026-07-18T14:21:55.000Z" itemprop="datePublished">2026-07-18</time>
+</a>
+    
+  <div class="article-category">
+    <a class="article-category-link" href="/categories/%E6%8A%80%E8%A1%93%E7%AD%86%E8%A8%98/">技術筆記</a>
+  </div>
+
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="p-name article-title" href="/2026/07/18/terraform-passed-but-deployment-had-not-started/">Terraform 通過之後，部署其實才剛開始</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <p>這次想在 AWS 放一台 Palworld 專用伺服器。需求沒有很複雜：GitHub Actions 負責建立或更新基礎設施，EC2 跑 Docker，世界存檔放在獨立磁碟。平常不開 SSH，改用 AWS Systems Manager 管理；修改設定後，也希望可以從 GitHub 再部署一次。</p>
+<p>一開始看起來很順。Terraform 格式檢查和驗證都過了，CloudFormation template 也沒有問題，GitHub Actions 的 YAML 和 shell script 也各自驗證過。</p>
+<p>但這些檢查只證明每一段「單獨看起來合理」。真正按下部署後，才發現接下來每一關都是不同系統在互相確認：GitHub 要證明自己是哪個 workflow，AWS 要決定要不要信它，CloudFormation 要維護資源，Scheduler 又要取得另一個角色的權限。</p>
+<p>Terraform 通過後，部署其實才剛開始。</p>
+<h2 id="先把誰在信誰講清楚"><a href="#先把誰在信誰講清楚" class="headerlink" title="先把誰在信誰講清楚"></a>先把誰在信誰講清楚</h2><p>這次的部署路徑大致是這樣：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">GitHub Actions</span><br><span class="line">  → 用 OIDC 向 AWS STS 換短期權限</span><br><span class="line">  → Terraform 建 EC2、EBS、網路與排程</span><br><span class="line">  → 上傳部署檔到 S3</span><br><span class="line">  → 用 SSM 對 EC2 下指令</span><br><span class="line">  → EC2 拉官方容器 image，啟動 Palworld</span><br></pre></td></tr></table></figure>
+
+<p>這裡沒有把長期 AWS access key 放進 GitHub。每次 workflow 執行時，GitHub 會帶一張只給這次 job 使用的 OIDC token 去 AWS 換短期 credentials。</p>
+<p>這幾個名詞很容易混在一起，我自己就是混過：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">GitHub 的 OIDC token</span><br><span class="line">  = GitHub 說「這個 workflow 是我發的」的身分證</span><br><span class="line"></span><br><span class="line">AWS 的 OIDC provider</span><br><span class="line">  = AWS 用來驗證這張身分證的驗票機</span><br><span class="line"></span><br><span class="line">CD role</span><br><span class="line">  = 寫著「什麼身分可以部署」的門禁規則</span><br><span class="line"></span><br><span class="line">短期 credentials</span><br><span class="line">  = 通過門禁後，這一次 workflow 拿到的臨時通行證</span><br></pre></td></tr></table></figure>
+
+<p>CD role 是長期留下來的規則，每次 workflow 不會共用的是最後那張短期 credentials。下面三個問題，剛好各自壞在這條鏈的不同位置。</p>
+<h2 id="第一關：GitHub-明明拿到了-token，AWS-還是不讓它進來"><a href="#第一關：GitHub-明明拿到了-token，AWS-還是不讓它進來" class="headerlink" title="第一關：GitHub 明明拿到了 token，AWS 還是不讓它進來"></a>第一關：GitHub 明明拿到了 token，AWS 還是不讓它進來</h2><p>CD role 的門禁規則會檢查 token 裡的 <code>sub</code> 欄位。它原本只接受指定 repository 的 <code>main</code> branch，大意像這樣：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">repo:&lt;owner&gt;/&lt;repo&gt;:ref:refs/heads/main</span><br></pre></td></tr></table></figure>
+
+<p>workflow 確實拿到了 JWT，但交給 AWS STS 換權限時被拒絕。意思是 GitHub 有出示身分證，CD role 看完後說「我不認這個格式」。</p>
+<p>我原本先懷疑 IAM policy、OIDC provider 或 GitHub permissions。後來直接把 GitHub runner 拿到的 token claims 拉出來看，才找到差異。</p>
+<p>舊規則預期的是 repository 名稱加 branch。GitHub 實際送來的 <code>sub</code> 則包含 owner 和 repository 的 immutable ID。它們仍然代表同一個 repository，但字串不一樣。門禁是精確比對，少一個字都不會過。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">CD role 期待：repo:&lt;owner&gt;/&lt;repo&gt;:ref:refs/heads/main</span><br><span class="line">GitHub 實送：repo:&lt;owner&gt;@&lt;owner-id&gt;/&lt;repo&gt;@&lt;repo-id&gt;:ref:refs/heads/main</span><br></pre></td></tr></table></figure>
+
+<p>修法不是把規則放寬成「任何 GitHub token 都可以進」。bootstrap 先從 GitHub API 取回 repository 的 <code>sub_claim_prefix</code>，再組出只接受目標 branch 的條件。</p>
+<p>修完後，用 GitHub runner 的真實 JWT 呼叫 <code>AssumeRoleWithWebIdentity</code> 成功。到這裡才證明 GitHub Actions 可以取得部署權限。範例 policy 能通過檢查，不代表它還符合 GitHub 目前實際送出的身分格式。</p>
+<h2 id="第二關：CD-role-還在，但驗票機被刪掉了"><a href="#第二關：CD-role-還在，但驗票機被刪掉了" class="headerlink" title="第二關：CD role 還在，但驗票機被刪掉了"></a>第二關：CD role 還在，但驗票機被刪掉了</h2><p>OIDC 修好後，下一次更新卻出現另一個錯誤：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">InvalidIdentityToken</span><br></pre></td></tr></table></figure>
+
+<p>這次 token 格式已經正確，CD role 也不是換了一組。問題是 AWS 裡用來驗證 GitHub token 的 OIDC provider 不見了。</p>
+<p>換回前面的比喻：門禁規則還在，但驗票機被拔掉了。GitHub 拿著正確身分證來，AWS 還是無法確認它是真的，因此回 <code>InvalidIdentityToken</code>。</p>
+<p>問題出在 bootstrap template。當時想法很直覺：帳號裡如果已經有 GitHub OIDC provider，這次 CloudFormation 就不要再建立一個。於是我把 provider 放在 condition 後面，condition 是 false 時不建立。</p>
+<p>第一次建立 stack 沒事，錯在後續更新。人看到 false，會理解成「已經有人管了，這次別碰」。CloudFormation 的理解不同：這個 stack 原本管理 provider，現在 template 說 condition 不成立，代表這個 resource 不該存在，因此要移除。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">第一次建立：condition = true</span><br><span class="line">  → stack 建立 OIDC provider</span><br><span class="line"></span><br><span class="line">下一次更新：condition = false</span><br><span class="line">  → stack 從自己的資源清單移除 OIDC provider</span><br><span class="line">  → GitHub token 沒有人能驗證</span><br></pre></td></tr></table></figure>
+
+<p>所以不是 CD role 沒有共用同一組。CD role 可以繼續存在，也會在每次 workflow 發新的短期 credentials；壞掉的是它信任鏈上的 OIDC provider。</p>
+<p>最後做法很單純：同一個 bootstrap stack 建立的 OIDC provider，就讓同一個 stack 一直管理。不要把 condition 當成「略過管理」或資源認養機制。</p>
+<h2 id="第三關：Terraform-寫得過，但-IAM-條件放錯了時機"><a href="#第三關：Terraform-寫得過，但-IAM-條件放錯了時機" class="headerlink" title="第三關：Terraform 寫得過，但 IAM 條件放錯了時機"></a>第三關：Terraform 寫得過，但 IAM 條件放錯了時機</h2><p>伺服器會保留定時開關機的能力，但預設關閉。開機比較單純；關機前則會先通知玩家、存檔、停止容器、備份世界資料，最後才關閉 EC2。</p>
+<p>我希望 Scheduler 使用的 execution role 不會被別的資源濫用，所以在 Terraform 裡替 role trust policy 加了兩個限制：</p>
+<ul>
+<li>請求必須來自同一個 AWS account。</li>
+<li>請求來源必須是那一條指定 schedule 的 ARN。</li>
+</ul>
+<p>這是合理的 confused-deputy 防護方向，AWS 文件也建議用 <code>aws:SourceAccount</code> 和 <code>aws:SourceArn</code> 限制跨服務代入角色。問題不在 Terraform 語法，而是我假設 schedule 在建立前就能拿自己的 ARN 證明身分。</p>
+<p>但實際建立 schedule 時，AWS 回了：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">The execution role you provide must allow AWS EventBridge Scheduler to assume the role.</span><br></pre></td></tr></table></figure>
+
+<p>建立流程其實是這樣：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">Terraform 呼叫 CreateSchedule</span><br><span class="line">  → Scheduler 先確認「我能不能 assume 這個 role？」</span><br><span class="line">  → trust policy 回答「只有指定 schedule ARN 可以 assume」</span><br><span class="line">  → 指定 schedule 此刻還不存在，無法滿足條件</span><br><span class="line">  → CreateSchedule 失敗</span><br></pre></td></tr></table></figure>
+
+<p>這算是 IaC 設定寫錯。不過不是 Terraform 不能建立 Scheduler，而是 IAM policy 對建立時機的假設錯了。安全條件寫得比 AWS 當下能提供的資訊更細，結果反而誰都進不去。</p>
+<p>最後保留 <code>SourceAccount</code>，移除那條在建立期無法成立的 schedule-specific <code>SourceArn</code>。這不是把防護整個拿掉，而是在實際流程下，留下真的能生效的限制。</p>
+<h2 id="最後，哪些東西是真的驗證過了？"><a href="#最後，哪些東西是真的驗證過了？" class="headerlink" title="最後，哪些東西是真的驗證過了？"></a>最後，哪些東西是真的驗證過了？</h2><p>修完這幾段後，GitHub Actions 確實能經由 OIDC 取得短期 AWS credentials；Terraform 能建立 EC2、獨立加密 EBS、SSM 管理權限和排程；部署流程也能把檔案交給 EC2，拉起官方 Palworld container。</p>
+<p>容器啟動後，在 EC2 內確認它是 <code>Up</code>，遊戲使用的 UDP port 也有監聽。首次拉 image 和初始化花了幾分鐘，這也讓我順手調整了 SSM command 等待時間，不再把第一次部署當成普通設定更新。</p>
+<p>但這篇不應該把它寫成「完整驗證」。我沒有再用真實遊戲客戶端建立角色並連入伺服器，所以遊戲層最後一段沒有測。確認的是 EC2、容器和 UDP socket 都正常，不是玩家已經完成一場遊戲。</p>
+<p>部署完成後，這次也沒有保留資源或世界資料。teardown 時還多看到一個很實際的成本細節：EBS 上的 <code>prevent_destroy</code> 的確擋住了誤刪；而 CloudFormation 設成 retain 的版本化 S3 bucket，刪 stack 後也不會自動清掉所有 object versions 和 delete markers。要真的不再產生儲存費，這些殘留物還是要另外清。</p>
+<h2 id="我最後留下的規則"><a href="#我最後留下的規則" class="headerlink" title="我最後留下的規則"></a>我最後留下的規則</h2><p>這次沒有得到什麼很新奇的架構。最後仍然是單台 EC2、Docker Compose、SSM、GitHub Actions 和 Terraform。</p>
+<p>比較有用的收穫反而很樸素：</p>
+<ul>
+<li><code>terraform validate</code> 驗證的是設定語法與 provider schema，不是跨服務部署一定成功。</li>
+<li>OIDC、CloudFormation、Scheduler 這種交界，不能只靠靜態檢查；要用真實 token、真實 stack update 和真實 API create 去驗證。</li>
+<li>看到「條件」或「安全限制」時，要多問一句：它是在建立時、更新時，還是實際執行時成立？</li>
+</ul>
+<p>把遊戲伺服器放上雲端，最後最花時間的不是遊戲本身，而是讓每個服務都能正確地相信下一個服務。這些邊界平常不太顯眼，等到真的部署時才會一起冒出來。</p>
+<h2 id="參考資料"><a href="#參考資料" class="headerlink" title="參考資料"></a>參考資料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://docs.github.com/en/actions/concepts/security/openid-connect">GitHub Actions 的 OpenID Connect 說明</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/intrinsic-function-reference-condition.html">AWS CloudFormation Conditions</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.aws.amazon.com/scheduler/latest/UserGuide/cross-service-confused-deputy-prevention.html">EventBridge Scheduler 的 confused deputy 防護</a></li>
+</ul>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://dennisyang101.github.io/2026/07/18/terraform-passed-but-deployment-had-not-started/" data-id="cuid2jyXIB2VynTGmw7cC__jI" data-title="Terraform 通過之後，部署其實才剛開始" class="article-share-link"><span class="fa fa-share">Share</span></a>
+      
+      
+      
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/AWS/" rel="tag">AWS</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/GitHub-Actions/" rel="tag">GitHub Actions</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/OIDC/" rel="tag">OIDC</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Palworld/" rel="tag">Palworld</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Terraform/" rel="tag">Terraform</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+
+  
+    <article id="post-hermes-desktop-tailscale-remote-gateway" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/2026/07/13/hermes-desktop-tailscale-remote-gateway/" class="article-date">
+  <time class="dt-published" datetime="2026-07-13T11:42:37.000Z" itemprop="datePublished">2026-07-13</time>
+</a>
+    
+  <div class="article-category">
+    <a class="article-category-link" href="/categories/%E6%8A%80%E8%A1%93%E7%AD%86%E8%A8%98/">技術筆記</a>
+  </div>
+
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="p-name article-title" href="/2026/07/13/hermes-desktop-tailscale-remote-gateway/">讓 MacBook 在外面也能用家裡的 Hermes Agent</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <p>Hermes Agent 平常跑在家裡的 Mac Mini。那台機器不會帶出門，但它保留了我平常使用的環境：模型設定、工作檔案、terminal、skills 和 cron 都在那裡。</p>
+<p>出門時我帶的是 MacBook。於是有一件事一直有點卡：明明 Mini 在家裡正常跑著，MacBook 卻只能算另一台乾淨的電腦。我要的不是再裝一套 Hermes，也不是把檔案複製到兩邊；我只想在外面打開 MacBook 的 Hermes Desktop，繼續操作家裡那個 Hermes。</p>
+<p>這件事有兩個前提。第一，不能為了方便就開 router port，讓管理介面直接面對網際網路。第二，MacBook 只是入口，真正跑 agent 和處理檔案的地方仍然是 Mac Mini。</p>
+<p>調研一輪後，我選 Tailscale。兩台 Mac 已經在同一個 Tailscale tailnet 裡，它提供一個加密的私有網路；MacBook 可以安全地找到 Mini，但外面的陌生裝置不會因此看到 Mini 的 Hermes 服務。</p>
+<p>連線方向是 MacBook 找 Mini：MacBook 必須在同一個 tailnet 裡，而 Mini 的 Hermes 必須只聽自己的 Tailscale IP。如此一來，MacBook 找得到 Mini，Mini 也只會接受從這條私有網路進來的連線。</p>
+<p>我原本以為這只是填一個遠端網址的事。最後倒也沒有變成很大的工程，不過中間改了兩次 Mac Mini 的設定，才搞懂每一層到底在做什麼。</p>
+<h2 id="一開始先連錯了服務"><a href="#一開始先連錯了服務" class="headerlink" title="一開始先連錯了服務"></a>一開始先連錯了服務</h2><p>Mini 原本有一個 <code>hermes gateway</code> 在跑，它負責 Discord 和 cron 這類訊息通道。我先入為主地以為 Hermes Desktop 也是連它。</p>
+<p>實際上不是。Desktop 的 <strong>Remote gateway</strong> 要連的是 <code>hermes serve</code>。</p>
+<p>可以把兩者想成不同的門：<code>hermes gateway</code> 是 Hermes 收發外部訊息的門；<code>hermes serve</code> 才是讓 Desktop 打開介面、建立即時連線的門。名字很像，功能完全不同。</p>
+<p>所以第一個調整，是在 Mini 上另外讓 <code>hermes serve</code> 常駐，並交給 launchd 管理。到這裡，MacBook 至少有一個正確的目標可以連。</p>
+<p>接著我開始處理 Tailscale Serve。它是 Tailscale 提供的反向代理功能，可以理解成一個接待台：MacBook 先連到這個 HTTPS 入口，接待台再把請求轉交給後面的 <code>hermes serve</code>。我當時想藉它提供一個看起來較標準的 HTTPS 網址。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">MacBook 的 Hermes Desktop</span><br><span class="line">  → Tailscale Serve</span><br><span class="line">  → Mac Mini 上的 hermes serve</span><br></pre></td></tr></table></figure>
+
+<p>看起來比直接開服務更完整，也有 HTTPS；但第一個問題就是從這裡開始的。</p>
+<h2 id="第一次卡住：看起來都通，Hermes-卻沒回話"><a href="#第一次卡住：看起來都通，Hermes-卻沒回話" class="headerlink" title="第一次卡住：看起來都通，Hermes 卻沒回話"></a>第一次卡住：看起來都通，Hermes 卻沒回話</h2><p>MacBook 端當時其實有不少好消息：Tailscale 顯示 Mini 在線、443 port 有反應，TLS handshake 也成功。照這些訊號看，像是已經連上了。</p>
+<p>但真正用 Desktop 打開服務時，它一直等不到 Hermes 的回應。入口有亮，後面卻沒有人開門。</p>
+<p>後來回頭看設定，才發現我把路繞複雜了。Tailscale Serve 已經把請求帶到 Mac Mini，卻又被設定成轉送到 Mini 自己的 Tailscale 位址。等於訪客已經走到門口，又被請去繞社區一圈，再回到同一扇門。這條繞路在我的設定裡沒有成功，Hermes 因此根本沒有收到請求。</p>
+<p><img src="/images/hermes-tailscale-serve-removal.svg" alt="移除 Tailscale Serve 前後的連線路徑"></p>
+<p>我先把轉送目標改成 <code>127.0.0.1:9119</code>，也就是 Mini 自己的本機位址。這次終於拿到 HTTP 回應，證明請求有進到 Hermes；下一個錯誤隨即出現。</p>
+<p>這一段學到的是：看到網路通了，不代表功能真的可用。還是得確認最末端的服務有收到請求、有回應。</p>
+<h2 id="第二次卡住：請求終於到了，主機端卻拒絕它"><a href="#第二次卡住：請求終於到了，主機端卻拒絕它" class="headerlink" title="第二次卡住：請求終於到了，主機端卻拒絕它"></a>第二次卡住：請求終於到了，主機端卻拒絕它</h2><p>第一個問題確認後，我先停止讓 Tailscale Serve 把請求送回 Mini 自己的 Tailscale 位址，改交給 Mini 的本機服務。這次 HTTP 終於有回應：請求確實進了 Mac Mini，也找到了 Hermes。</p>
+<p>不過 Hermes 馬上回了：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Invalid Host header</span><br></pre></td></tr></table></figure>
+
+<p>白話來說，路走對了，主機端卻不認得這個來訪者。</p>
+<p>原因是 Hermes 當時只待在 Mini 的本機位址 <code>127.0.0.1</code>。它只預期收到「Mini 自己」的地址；但 Tailscale Serve 轉送過來的請求，帶的是外部的 Tailscale 網址名稱。Hermes 看到兩個地址不一致，就把門關上。</p>
+<p>這個檢查不能直接拿掉。它是安全保護：原本只打算給本機使用的服務，不應該因為有人換了一個網址名稱，就接受任何來源的請求。</p>
+<p>看似簡單的做法是直接把服務改成接受整個家用 LAN 的連線，或略過這個檢查。雖然錯誤可能會消失，但管理入口也會開得比需求更大。既然 Tailscale 已經提供一條可由 tailnet 規則控管的私有路徑，比較好的解法是讓 Hermes 直接待在那條路上。</p>
+<h2 id="第二次調整：讓-MacBook-直接走-Tailscale-到-Mini"><a href="#第二次調整：讓-MacBook-直接走-Tailscale-到-Mini" class="headerlink" title="第二次調整：讓 MacBook 直接走 Tailscale 到 Mini"></a>第二次調整：讓 MacBook 直接走 Tailscale 到 Mini</h2><p>既然 MacBook 和 Mini 已經在同一個私有網路，Tailscale Serve 其實不是必要的中間人。</p>
+<p>最後做法是：Mini 上的 <code>hermes serve</code> 只綁定自己的 Tailscale IP，MacBook Desktop 也直接連那個 IP。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">MacBook 的 Hermes Desktop</span><br><span class="line">  → Tailscale 加密私有網路</span><br><span class="line">  → Mac Mini 的 hermes serve</span><br></pre></td></tr></table></figure>
+
+<p>概念上的設定只有兩件事：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Mac Mini：hermes serve --host &lt;TAILSCALE_IP&gt; --port 9119 --no-open</span><br><span class="line">MacBook：Remote gateway = http://&lt;TAILSCALE_IP&gt;:9119</span><br></pre></td></tr></table></figure>
+
+<p>原本與最後的差別是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">原本：Hermes 只認得「Mini 自己」的本機地址</span><br><span class="line">      MacBook 經 Serve 帶來「另一個外部地址」</span><br><span class="line">      → Hermes 拒絕</span><br><span class="line"></span><br><span class="line">最後：Hermes 聽在 Mini 的 Tailscale 地址</span><br><span class="line">      MacBook 也連 Mini 的 Tailscale 地址</span><br><span class="line">      → 地址一致，Hermes 接受</span><br></pre></td></tr></table></figure>
+
+<p>這次路徑短了，也剛好解掉前面兩個問題：</p>
+<ul>
+<li>請求不再經過多餘的接待台，不會繞回 Mini 自己。</li>
+<li>Desktop 使用的網址和 Mini 服務監聽的網址一致，Hermes 不會再把它誤認成不該接受的請求。</li>
+</ul>
+<p>網址雖然寫成 <code>http://</code>，但資料不是直接經過公網傳送；它仍在 Tailscale 的私有連線中。這個情境下，再多加一層反向代理和 TLS，沒有解決實際問題，反而多了一個可能壞掉的地方。</p>
+<h2 id="這樣直接連，安全嗎？"><a href="#這樣直接連，安全嗎？" class="headerlink" title="這樣直接連，安全嗎？"></a>這樣直接連，安全嗎？</h2><p>前提是兩台裝置都已加入同一個 Tailscale tailnet，而且 tailnet 的存取規則只允許應該連線的裝置。這條路徑沒有 router port forwarding，也不把 <code>hermes serve</code> 綁到 <code>0.0.0.0</code>；它只聽 Mini 的 Tailscale IP。因此家用 LAN 上其他裝置和公網使用者都不會看到這個服務。</p>
+<p>傳輸層由 Tailscale 的 WireGuard 加密，Hermes 本身則保留 Basic Auth。前者保護 MacBook 到 Mini 的網路路徑，後者保護實際進入 Hermes 的人，因此 Desktop 仍會顯示帳密登入表單。這也是我沒有為了排錯關掉登入，或改成對整個 LAN 開放服務的原因。</p>
+<h2 id="最後怎麼知道它真的好了"><a href="#最後怎麼知道它真的好了" class="headerlink" title="最後怎麼知道它真的好了"></a>最後怎麼知道它真的好了</h2><p>最後的驗證不是只看 ping 通，而是拿 MacBook 實際走完一次使用流程：</p>
+<ol>
+<li>Hermes Desktop 找得到 Mini，並顯示登入表單。</li>
+<li>輸入帳密後可以儲存設定並重新連線。</li>
+<li>Desktop 顯示已連上，也能正常操作 Mini 上的 Hermes。</li>
+</ol>
+<p>技術上，最後的即時連線完成了 WebSocket upgrade，收到了 <code>101 Switching Protocols</code> 和 <code>gateway.ready</code>。這代表整條路真的接通；一般使用時，只要 Desktop 能正常連上並工作就夠了。</p>
+<p>最後留下來的東西比一開始想像的少：Tailscale、只綁 Tailscale IP 的 <code>hermes serve</code>，以及登入保護。沒有 port forwarding，沒有公開的管理介面，也沒有不必要的反向代理。</p>
+<p>這次比較有意思的不是某個指令，而是過程裡一直在做同一件事：每多一層設定，就多一個可能出錯的位置。既然兩台 Mac 已經在同一個安全的私有網路裡，直接連反而是最穩、也最容易維護的方案。</p>
+<details>
+<summary>技術備註：第二次錯誤的原因</summary>
+
+<p><code>hermes serve</code> 綁在 <code>127.0.0.1</code> 時，只接受 <code>localhost</code> 或 <code>127.0.0.1</code> 這類本機 Host header。Tailscale Serve 轉送時保留外部的 Tailscale hostname，因此觸發 Hermes 的 Host header／DNS rebinding 防護。</p>
+</details>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://dennisyang101.github.io/2026/07/13/hermes-desktop-tailscale-remote-gateway/" data-id="cuidHQPfRoMqijZg6GWPOjpYm" data-title="讓 MacBook 在外面也能用家裡的 Hermes Agent" class="article-share-link"><span class="fa fa-share">Share</span></a>
+      
+      
+      
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Hermes/" rel="tag">Hermes</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Tailscale/" rel="tag">Tailscale</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/macOS/" rel="tag">macOS</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E9%81%A0%E7%AB%AF%E9%80%A3%E7%B7%9A/" rel="tag">遠端連線</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+
+  
+    <article id="post-hello-world" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/2026/07/09/hello-world/" class="article-date">
+  <time class="dt-published" datetime="2026-07-09T04:00:00.000Z" itemprop="datePublished">2026-07-09</time>
+</a>
+    
+  <div class="article-category">
+    <a class="article-category-link" href="/categories/%E6%8A%80%E8%A1%93%E7%AD%86%E8%A8%98/">技術筆記</a>
+  </div>
+
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="p-name article-title" href="/2026/07/09/hello-world/">用 Hexo 部署第一篇文章到 GitHub Pages</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <p>這篇記一下這個部落格怎麼從空資料夾變成 GitHub Pages。</p>
+<h2 id="1-建-Hexo-專案"><a href="#1-建-Hexo-專案" class="headerlink" title="1. 建 Hexo 專案"></a>1. 建 Hexo 專案</h2><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">npx hexo-cli init dennisyang101.github.io</span><br><span class="line"><span class="built_in">cd</span> dennisyang101.github.io</span><br><span class="line">npm install</span><br></pre></td></tr></table></figure>
+
+<h2 id="2-改基本設定"><a href="#2-改基本設定" class="headerlink" title="2. 改基本設定"></a>2. 改基本設定</h2><p><code>_config.yml</code>：</p>
+<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="attr">title:</span> <span class="string">Dennis</span> <span class="string">Yang</span></span><br><span class="line"><span class="attr">author:</span> <span class="string">Dennis</span> <span class="string">Yang</span></span><br><span class="line"><span class="attr">language:</span> <span class="string">zh-TW</span></span><br><span class="line"><span class="attr">timezone:</span> <span class="string">Asia/Taipei</span></span><br><span class="line"><span class="attr">url:</span> <span class="string">https://dennisyang101.github.io</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="3-寫第一篇文章"><a href="#3-寫第一篇文章" class="headerlink" title="3. 寫第一篇文章"></a>3. 寫第一篇文章</h2><p>文章放在：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">source/_posts/hello-world.md</span><br></pre></td></tr></table></figure>
+
+<p>front matter 大概長這樣：</p>
+<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">---</span></span><br><span class="line"><span class="attr">title:</span> <span class="string">用</span> <span class="string">Hexo</span> <span class="string">部署第一篇文章到</span> <span class="string">GitHub</span> <span class="string">Pages</span></span><br><span class="line"><span class="attr">date:</span> <span class="number">2026-07-09 12:00:00</span></span><br><span class="line"><span class="attr">categories:</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">技術筆記</span></span><br><span class="line"><span class="attr">tags:</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">Hexo</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">GitHub</span> <span class="string">Pages</span></span><br><span class="line"><span class="meta">---</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="4-本機確認"><a href="#4-本機確認" class="headerlink" title="4. 本機確認"></a>4. 本機確認</h2><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">npm run build</span><br><span class="line">npm run server</span><br></pre></td></tr></table></figure>
+
+<p>打開 <code>http://localhost:4000</code> 看一下。沒問題再推。</p>
+<h2 id="5-用-GitHub-Actions-部署"><a href="#5-用-GitHub-Actions-部署" class="headerlink" title="5. 用 GitHub Actions 部署"></a>5. 用 GitHub Actions 部署</h2><p>這個 repo 用 <code>source</code> 分支放 Hexo 原始碼，GitHub Pages 由 Actions build。</p>
+<p>workflow 放在：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">.github/workflows/pages.yml</span><br></pre></td></tr></table></figure>
+
+<p>之後只要：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">git add .</span><br><span class="line">git commit -m <span class="string">&quot;Add first post&quot;</span></span><br><span class="line">git push</span><br></pre></td></tr></table></figure>
+
+<p>Actions 會自己跑 <code>npm ci</code>、<code>npm run build</code>，再把 <code>public/</code> 發到 GitHub Pages。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://dennisyang101.github.io/2026/07/09/hello-world/" data-id="cuidCH_cmukkcgMNUxq3WzxST" data-title="用 Hexo 部署第一篇文章到 GitHub Pages" class="article-share-link"><span class="fa fa-share">Share</span></a>
+      
+      
+      
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/GitHub-Pages/" rel="tag">GitHub Pages</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Hexo/" rel="tag">Hexo</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+
+  
+    <article id="post-tcp-and-udp" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/2025/07/14/tcp-and-udp/" class="article-date">
+  <time class="dt-published" datetime="2025-07-14T04:00:00.000Z" itemprop="datePublished">2025-07-14</time>
+</a>
+    
+  <div class="article-category">
+    <a class="article-category-link" href="/categories/%E6%8A%80%E8%A1%93%E7%AD%86%E8%A8%98/">技術筆記</a>
+  </div>
+
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="p-name article-title" href="/2025/07/14/tcp-and-udp/">HTTP/3 為什麼跑在 UDP 上，卻還是可靠？</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <p>以前剛學 TCP 和 UDP 時，很容易把它們記成二選一：TCP 可靠但慢，UDP 快但可能丟資料。</p>
+<p>這個說法作為入門沒有錯，但放到現在的網路上已經不太夠用了。因為 HTTP&#x2F;3 是建立在 QUIC 上，而 QUIC 的封包正是走 UDP。照舊印象來看，網頁怎麼會願意把 HTML、圖片和登入資料交給「可能丟包」的 UDP？</p>
+<p>關鍵是：<strong>HTTP&#x2F;3 不是直接把網頁內容裸丟進 UDP。</strong> UDP 只負責把 QUIC 封包送到另一端；可靠傳輸、排序、流量控制、壅塞控制和加密，則由 QUIC 自己處理。</p>
+<h2 id="UDP-不可靠，QUIC-仍然可以可靠"><a href="#UDP-不可靠，QUIC-仍然可以可靠" class="headerlink" title="UDP 不可靠，QUIC 仍然可以可靠"></a>UDP 不可靠，QUIC 仍然可以可靠</h2><p>UDP 本身很單純。它送出一個 datagram，沒有連線狀態，也不承諾對方一定收到、一定照原本順序收到。</p>
+<p>QUIC 選擇用 UDP 當底層封包格式，但在上面補回網頁傳輸需要的能力：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">HTTP/3</span><br><span class="line">  ↓</span><br><span class="line">QUIC：stream、遺失偵測、重傳、壅塞控制、TLS 1.3</span><br><span class="line">  ↓</span><br><span class="line">UDP：把 QUIC 封包送到網路上</span><br><span class="line">  ↓</span><br><span class="line">IP</span><br></pre></td></tr></table></figure>
+
+<p>所以「HTTP&#x2F;3 用 UDP」不等於「HTTP&#x2F;3 不可靠」。比較接近的說法是：QUIC 不借用 TCP 已有的可靠傳輸機制，而是自己在 UDP 之上實作一套。</p>
+<p><a target="_blank" rel="noopener" href="https://www.rfc-editor.org/rfc/rfc9000.html">IETF 的 QUIC 標準 RFC 9000</a> 明確定義了遺失偵測、復原和壅塞控制所需的回饋機制；HTTP&#x2F;3 則依賴 QUIC 提供每條 stream 內可靠且有順序的傳輸。<a target="_blank" rel="noopener" href="https://www.rfc-editor.org/rfc/rfc9114.html">RFC 9114</a> 也把這件事寫得很直接：HTTP&#x2F;3 的可靠性是在 QUIC 的 stream 層，而不是 UDP 本身。</p>
+<h2 id="要解的不是「TCP-太慢」，而是一個封包拖住全部請求"><a href="#要解的不是「TCP-太慢」，而是一個封包拖住全部請求" class="headerlink" title="要解的不是「TCP 太慢」，而是一個封包拖住全部請求"></a>要解的不是「TCP 太慢」，而是一個封包拖住全部請求</h2><p>HTTP&#x2F;2 已經能讓多個請求共用一條 TCP 連線。瀏覽器可以同時請 HTML、CSS、JavaScript 和圖片，不必像 HTTP&#x2F;1.1 那樣開很多 TCP 連線。</p>
+<p>問題在於 TCP 只看得見一條按順序排列的位元組串流。假設其中一個 TCP 封包遺失，後面的資料即使已經到達，TCP 仍要先等遺失的部分補回來。這會讓同一條連線上的其他 HTTP&#x2F;2 請求一起停住，稱為 transport-layer head-of-line blocking。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">HTTP/2 over TCP</span><br><span class="line"></span><br><span class="line">CSS 的封包遺失</span><br><span class="line">  ↓</span><br><span class="line">TCP 等待重傳，維持整條位元組串流順序</span><br><span class="line">  ↓</span><br><span class="line">同一條連線上的圖片、JavaScript 回應也得等</span><br></pre></td></tr></table></figure>
+
+<p>這不是說 HTTP&#x2F;2 沒有多工；它有。問題是 HTTP&#x2F;2 的多工在 TCP 上面，但 TCP 不知道哪些位元組屬於哪個 HTTP 請求。</p>
+<p>QUIC 把 stream 放到傳輸層。HTTP&#x2F;3 的每個請求可以使用獨立的 QUIC stream；某條 stream 的封包遺失時，那條 stream 仍須等待重傳，但不必把其他 stream 一起卡住。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">HTTP/3 over QUIC over UDP</span><br><span class="line"></span><br><span class="line">CSS 所在的 stream 有封包遺失</span><br><span class="line">  ↓</span><br><span class="line">QUIC 只重傳那條 stream 缺少的資料</span><br><span class="line">  ↓</span><br><span class="line">其他 stream 仍可繼續交付已收到的資料</span><br></pre></td></tr></table></figure>
+
+<p>這是 HTTP&#x2F;3 選 QUIC 的主要理由之一。它不是讓丟包變得沒關係，而是把丟包造成的等待限制在受影響的 stream 裡。</p>
+<h2 id="QUIC-不只是在-UDP-上加一個重傳"><a href="#QUIC-不只是在-UDP-上加一個重傳" class="headerlink" title="QUIC 不只是在 UDP 上加一個重傳"></a>QUIC 不只是在 UDP 上加一個重傳</h2><p>如果只是重傳，QUIC 不會值得另外做成一套傳輸協定。它還把幾件原本分散在 TCP、TLS 和 HTTP&#x2F;2 的事情重新組合：</p>
+<ul>
+<li><strong>加密</strong>：QUIC 整合 TLS 1.3。HTTP&#x2F;3 不支援未加密的 QUIC 連線。</li>
+<li><strong>每條 stream 的流量控制</strong>：一個慢的接收端不應無限吃掉記憶體，也不該輕易影響其他 stream。</li>
+<li><strong>整條連線的壅塞控制</strong>：QUIC 仍然需要在網路塞車時降速，不能因為底層是 UDP 就任意送封包。</li>
+<li><strong>較快的重新連線條件</strong>：對曾連過的伺服器，QUIC 可使用 0-RTT 提早送資料；但這不是每次新連線都免費加速，伺服器也必須考慮重送攻擊風險。</li>
+<li><strong>連線遷移</strong>：裝置從 Wi‑Fi 切到行動網路時，QUIC 可以利用 connection ID 嘗試維持同一條連線；實際能否持續仍取決於雙方與網路狀況。</li>
+</ul>
+<p>因此，把 QUIC 稱為「UDP 的替代品」不太準確。它比較像一個新的傳輸層協定，只是選擇把自己的封包放進 UDP datagram 裡，讓它能在既有網路設備上部署。</p>
+<h2 id="那-TCP-和-UDP-還怎麼選？"><a href="#那-TCP-和-UDP-還怎麼選？" class="headerlink" title="那 TCP 和 UDP 還怎麼選？"></a>那 TCP 和 UDP 還怎麼選？</h2><p>對應用程式開發者來說，選擇通常仍然很簡單：大多數需要可靠雙向連線的程式，用 TCP 或現有的 HTTPS stack 就好。瀏覽器是否改用 HTTP&#x2F;3，主要是瀏覽器與伺服器協商的結果，不是網站前端要自己用 UDP socket 重寫。</p>
+<p>UDP 適合的情境仍然存在，例如 DNS、即時語音、遊戲的位置更新，或應用本來就能容忍少量過期資料。這些場合常常寧可漏掉一個舊封包，也不要等待它重傳。</p>
+<p>QUIC 則是另一種情況：它使用 UDP 的部署方式，但提供 HTTP 所需的可靠傳輸。它不能讓網路沒有遺失或延遲；它只是避免一個遺失封包把本來不相關的 HTTP 請求一起拖住。</p>
+<p>下次看到瀏覽器顯示 HTTP&#x2F;3 或 <code>h3</code> 時，可以把它想成這條路徑：UDP 在最底下送封包，QUIC 在中間負責可靠性與加密，HTTP&#x2F;3 才在最上面傳遞網頁請求。</p>
+<h2 id="參考資料"><a href="#參考資料" class="headerlink" title="參考資料"></a>參考資料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://www.rfc-editor.org/rfc/rfc9000.html">RFC 9000: QUIC: A UDP-Based Multiplexed and Secure Transport</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.rfc-editor.org/rfc/rfc9114.html">RFC 9114: HTTP&#x2F;3</a></li>
+</ul>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://dennisyang101.github.io/2025/07/14/tcp-and-udp/" data-id="cuidO1CwFcCkd3zYmVVOSwbu_" data-title="HTTP/3 為什麼跑在 UDP 上，卻還是可靠？" class="article-share-link"><span class="fa fa-share">Share</span></a>
+      
+      
+      
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/HTTP-3/" rel="tag">HTTP&#x2F;3</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/QUIC/" rel="tag">QUIC</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/UDP/" rel="tag">UDP</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E7%B6%B2%E8%B7%AF%E5%8D%94%E8%AD%B0/" rel="tag">網路協議</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+
+  
+
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">分類</h3>
+    <div class="widget">
+      <ul class="category-list"><li class="category-list-item"><a class="category-list-link" href="/categories/%E6%8A%80%E8%A1%93%E7%AD%86%E8%A8%98/">技術筆記</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">標籤</h3>
+    <div class="widget">
+      <ul class="tag-list" itemprop="keywords"><li class="tag-list-item"><a class="tag-list-link" href="/tags/AWS/" rel="tag">AWS</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/GitHub-Actions/" rel="tag">GitHub Actions</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/GitHub-Pages/" rel="tag">GitHub Pages</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/HTTP-3/" rel="tag">HTTP&#x2F;3</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Hermes/" rel="tag">Hermes</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Hexo/" rel="tag">Hexo</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/OIDC/" rel="tag">OIDC</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Palworld/" rel="tag">Palworld</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/QUIC/" rel="tag">QUIC</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tailscale/" rel="tag">Tailscale</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Terraform/" rel="tag">Terraform</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/UDP/" rel="tag">UDP</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/macOS/" rel="tag">macOS</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/%E7%B6%B2%E8%B7%AF%E5%8D%94%E8%AD%B0/" rel="tag">網路協議</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/%E9%81%A0%E7%AB%AF%E9%80%A3%E7%B7%9A/" rel="tag">遠端連線</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">標籤雲</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/AWS/" style="font-size: 10px;">AWS</a> <a href="/tags/GitHub-Actions/" style="font-size: 10px;">GitHub Actions</a> <a href="/tags/GitHub-Pages/" style="font-size: 10px;">GitHub Pages</a> <a href="/tags/HTTP-3/" style="font-size: 10px;">HTTP/3</a> <a href="/tags/Hermes/" style="font-size: 10px;">Hermes</a> <a href="/tags/Hexo/" style="font-size: 10px;">Hexo</a> <a href="/tags/OIDC/" style="font-size: 10px;">OIDC</a> <a href="/tags/Palworld/" style="font-size: 10px;">Palworld</a> <a href="/tags/QUIC/" style="font-size: 10px;">QUIC</a> <a href="/tags/Tailscale/" style="font-size: 10px;">Tailscale</a> <a href="/tags/Terraform/" style="font-size: 10px;">Terraform</a> <a href="/tags/UDP/" style="font-size: 10px;">UDP</a> <a href="/tags/macOS/" style="font-size: 10px;">macOS</a> <a href="/tags/%E7%B6%B2%E8%B7%AF%E5%8D%94%E8%AD%B0/" style="font-size: 10px;">網路協議</a> <a href="/tags/%E9%81%A0%E7%AB%AF%E9%80%A3%E7%B7%9A/" style="font-size: 10px;">遠端連線</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">彙整</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2026/07/">七月 2026</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2025/07/">七月 2025</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">最新文章</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2026/07/18/terraform-passed-but-deployment-had-not-started/">Terraform 通過之後，部署其實才剛開始</a>
+          </li>
+        
+          <li>
+            <a href="/2026/07/13/hermes-desktop-tailscale-remote-gateway/">讓 MacBook 在外面也能用家裡的 Hermes Agent</a>
+          </li>
+        
+          <li>
+            <a href="/2026/07/09/hello-world/">用 Hexo 部署第一篇文章到 GitHub Pages</a>
+          </li>
+        
+          <li>
+            <a href="/2025/07/14/tcp-and-udp/">HTTP/3 為什麼跑在 UDP 上，卻還是可靠？</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      
+      &copy; 2026 Dennis Yang<br>
+      Powered by <a href="https://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+
+<script src="/js/jquery-3.6.4.min.js"></script>
+
+
+
+  
+<script src="/fancybox/jquery.fancybox.min.js"></script>
+
+
+
+
+<script src="/js/script.js"></script>
+
+
+
+
+
+  </div>
+</body>
+</html>
